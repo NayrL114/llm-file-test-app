@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 function formatBytes(bytes) {
@@ -11,10 +11,6 @@ function formatBytes(bytes) {
   return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
 }
 
-function isPlainObject(v) {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
 /**
  * Convert JSON to vertical rows: { path, value }
  * - Objects become dot paths (a.b.c)
@@ -25,13 +21,14 @@ function jsonToRows(data) {
   const rows = [];
 
   function walk(value, path) {
-    // null / primitive
     if (value === null || typeof value !== "object") {
-      rows.push({ path: path || "(root)", value: value === undefined ? "" : String(value) });
+      rows.push({
+        path: path || "(root)",
+        value: value === undefined ? "" : String(value),
+      });
       return;
     }
 
-    // Array
     if (Array.isArray(value)) {
       if (value.length === 0) {
         rows.push({ path: path || "(root)", value: "[]" });
@@ -44,7 +41,6 @@ function jsonToRows(data) {
       return;
     }
 
-    // Object
     const keys = Object.keys(value);
     if (keys.length === 0) {
       rows.push({ path: path || "(root)", value: "{}" });
@@ -69,7 +65,9 @@ function downloadJsonToDisk(obj, filenameBase = "extracted") {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${safeBase}-${ts}.json`;
 
-  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
+  const blob = new Blob([JSON.stringify(obj, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
@@ -89,7 +87,9 @@ export default function App() {
 
   // File analysis
   const [selectedFile, setSelectedFile] = useState(null);
-  const [commandFile, setCommandFile] = useState("extract-v1.json");
+  const fileInputRef = useRef(null);
+
+  // Extracted JSON
   const [jsonResult, setJsonResult] = useState(null);
 
   // UI state
@@ -175,9 +175,7 @@ export default function App() {
       const fd = new FormData();
       fd.append("file", selectedFile);
 
-      const cmd = (commandFile || "").trim();
-      if (cmd) fd.append("command", cmd);
-
+      // No command input from frontend; backend loads instruction JSON internally.
       const resp = await fetch("/api/analyze-file", {
         method: "POST",
         body: fd,
@@ -206,6 +204,13 @@ export default function App() {
     }
   }
 
+  function handleRemoveCurrentUploadedFile() {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
   function loadHistoryItem(item) {
     setSelectedId(item.id);
     setError(item.error || "");
@@ -213,7 +218,6 @@ export default function App() {
     const reqType = item.request_type || "chat";
 
     if (reqType === "file" || item.result_json) {
-      // For file items: show extracted JSON
       setPrompt("");
       setOutput("");
 
@@ -227,7 +231,6 @@ export default function App() {
         setJsonResult(null);
       }
     } else {
-      // For chat items: show text output
       setPrompt(item.prompt || "");
       setOutput(item.response || "");
       setJsonResult(null);
@@ -280,11 +283,9 @@ export default function App() {
     return item.prompt || "(chat)";
   }
 
-  // Determines filename base for downloading current JSON
   const downloadBaseName = useMemo(() => {
     if (selected && (selected.request_type === "file" || selected.result_json)) {
       const name = selected.file_name || "extracted";
-      // Strip extension for nicer filename
       return name.replace(/\.[^/.]+$/, "") || "extracted";
     }
     if (selectedFile?.name) return selectedFile.name.replace(/\.[^/.]+$/, "");
@@ -320,20 +321,22 @@ export default function App() {
 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".pdf,.docx,.txt,image/*"
                 onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
               />
 
-              <input
-                value={commandFile}
-                onChange={(e) => setCommandFile(e.target.value)}
-                placeholder="Command spec (e.g. extract-v1.json)"
-                style={{ flex: 1, minWidth: 260, padding: 8 }}
-              />
-
               <button onClick={handleAnalyzeFile} disabled={loading || !selectedFile}>
                 {loading ? "Analyzing..." : "Analyze"}
+              </button>
+
+              <button
+                onClick={handleRemoveCurrentUploadedFile}
+                disabled={loading || !selectedFile}
+                title={selectedFile ? "Clear current file selection" : "No file selected"}
+              >
+                Remove Current Uploaded File
               </button>
             </div>
 
@@ -358,7 +361,7 @@ export default function App() {
             </div>
 
             <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-              Supported: PDF, DOCX, TXT, JPG/PNG/WEBP/AVIF. Default command: extract-v1.json
+              Supported: PDF, DOCX, TXT, JPG/PNG/WEBP/AVIF. The backend chooses the extraction command.
             </div>
           </div>
 
@@ -379,7 +382,14 @@ export default function App() {
           </pre>
 
           {/* Extracted JSON: raw + table + download */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 16,
+            }}
+          >
             <h3 style={{ margin: 0 }}>Extracted JSON</h3>
 
             <div style={{ display: "flex", gap: 8 }}>
@@ -420,7 +430,14 @@ export default function App() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
                   <tr>
-                    <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee", width: "45%" }}>
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: 10,
+                        borderBottom: "1px solid #eee",
+                        width: "45%",
+                      }}
+                    >
                       Field
                     </th>
                     <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>

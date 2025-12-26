@@ -1,142 +1,145 @@
 {
-  "role": "Headhunting agent",
-  "task_summary": {
-    "objective": "Handle incoming candidate resumes for job postings by extracting information from each provided resume file and outputting it into JSON.",
-    "supported_input_formats": ["pdf", "docx", "txt", "images (all common image formats)"],
-    "language_handling": {
-      "may_translate_for_understanding": true,
-      "output_text_rule": "Preserve the original-language text in the JSON output. Do not summarise or change the contents."
-    },
-    "batch_handling": {
-      "multiple_resumes_per_input_allowed": true,
-      "output_rule": "Create a single JSON for every single resume."
-    }
-  },
-  "extraction_rules": {
-    "global_rules": {
-      "no_summarisation": true,
-      "no_content_modification": true,
-      "preserve_original_text": true
-    },
-    "sections": [
-      {
-        "section_name": "personal_profile",
-        "action": "extract",
-        "fields": [
-          { "key": "first_name", "required": true },
-          { "key": "last_name", "required": true },
-          {
-            "key": "date_of_birth",
-            "required": false,
-            "include_only_if_present_in_resume": true,
-            "note": "If present, create the corresponding data label; otherwise do not create this label."
-          },
-          {
-            "key": "phone_country_code",
-            "required": false,
-            "include_only_if_present_in_resume": true,
-            "note": "If present, create the corresponding data label; otherwise do not create this label."
-          },
-          {
-            "key": "phone",
-            "required": false,
-            "phone_parsing_rule": "If the phone data contains a phone country code, separate the phone country code into 'phone_country_code' and put the remaining number into 'phone'. Otherwise, do not create the 'phone_country_code' label."
-          },
-          { "key": "email", "required": false },
-          {
-            "key": "location",
-            "required": false,
-            "include_only_if_present_in_resume": true,
-            "note": "If present, create the corresponding data label; otherwise do not create this label."
-          },
-          {
-            "key": "website_links",
-            "required": false,
-            "include_only_if_present_in_resume": true,
-            "note": "If present, create the corresponding data label; otherwise do not create this label."
-          },
-          { "key": "skill_keywords", "required": false },
-          { "key": "bio", "required": false }
-        ]
+  "schema_name": "resume_extraction_v1",
+  "schema": {
+    "role": "Headhunting agent",
+    "task_summary": {
+      "objective": "Handle incoming candidate resumes for job postings by extracting information from each provided resume file and outputting it into JSON.",
+      "supported_input_formats": ["pdf", "docx", "txt", "images (all common image formats)"],
+      "language_handling": {
+        "may_translate_for_understanding": true,
+        "output_text_rule": "Preserve the original-language text in the JSON output. Do not summarise or change the contents."
       },
-      {
-        "section_name": "work_history",
-        "condition": "If work history is contained in the resume, extract it; else skip this section entirely.",
-        "action_if_present": "extract_repeatable",
-        "repeat_rule": "Repeat for multiple work histories, adding numbering in the corresponding data labels.",
-        "fields_per_item": [
-          { "key": "role_name" },
-          { "key": "company_name" },
-          { "key": "start_time" },
-          { "key": "end_time" },
-          { "key": "descriptions" }
-        ]
-      },
-      {
-        "section_name": "education_history",
-        "condition": "If education history is contained in the resume, extract it; else skip this section entirely.",
-        "action_if_present": "extract_repeatable",
-        "repeat_rule": "Repeat for multiple education histories, adding numbering in the corresponding data labels.",
-        "fields_per_item": [
-          { "key": "degree_name" },
-          { "key": "school_name" },
-          { "key": "start_time" },
-          { "key": "end_time" },
-          { "key": "descriptions" }
-        ]
-      },
-      {
-        "section_name": "optional_sections",
-        "condition": "If any of the following additional information is contained in the resume, create corresponding data labels and extract the information into the JSON file; else skip.",
-        "action_if_present": "extract_if_present",
-        "optional_section_keys": [
-          "awards",
-          "project_experiences",
-          "certifications",
-          "volunteer_work",
-          "languages",
-          "hobbies"
-        ]
+      "batch_handling": {
+        "multiple_resumes_per_input_allowed": true,
+        "output_rule": "Create a single JSON for every single resume."
       }
-    ]
-  },
-  "output_schema_per_resume": {
-    "output_type": "single JSON object per resume",
-    "recommended_structure": {
-      "personal_profile": {
-        "first_name": "string",
-        "last_name": "string",
-        "date_of_birth": "string (only if present)",
-        "phone_country_code": "string (only if present or separated from phone)",
-        "phone": "string",
-        "email": "string",
-        "location": "string (only if present)",
-        "website_links": ["string (only if present)"],
-        "skill_keywords": ["string"],
-        "bio": "string"
+    },
+    "extraction_rules": {
+      "global_rules": {
+        "no_summarisation": true,
+        "no_content_modification": true,
+        "preserve_original_text": true
       },
-      "work_history_1": {
-        "role_name": "string",
-        "company_name": "string",
-        "start_time": "string",
-        "end_time": "string",
-        "descriptions": "string"
-      },
-      "work_history_2": "repeat as needed",
-      "education_history_1": {
-        "degree_name": "string",
-        "school_name": "string",
-        "start_time": "string",
-        "end_time": "string",
-        "descriptions": "string"
-      },
-      "education_history_2": "repeat as needed",
-      "awards": "string (only if present)",
-      "project_experiences": "string (only if present)",
-      "certifications": "string (only if present)",
-      "volunteer_work": "string (only if present)",
-      "languages": "string (only if present)",
-      "hobbies": "string (only if present)"
+      "sections": [
+        {
+          "section_name": "personal_profile",
+          "action": "extract",
+          "fields": [
+            { "key": "first_name", "required": true },
+            { "key": "last_name", "required": true },
+            {
+              "key": "date_of_birth",
+              "required": false,
+              "include_only_if_present_in_resume": true,
+              "note": "If present, create the corresponding data label; otherwise do not create this label."
+            },
+            {
+              "key": "phone_country_code",
+              "required": false,
+              "include_only_if_present_in_resume": true,
+              "note": "If present, create the corresponding data label; otherwise do not create this label."
+            },
+            {
+              "key": "phone",
+              "required": false,
+              "phone_parsing_rule": "If the phone data contains a phone country code, separate the phone country code into 'phone_country_code' and put the remaining number into 'phone'. Otherwise, do not create the 'phone_country_code' label."
+            },
+            { "key": "email", "required": false },
+            {
+              "key": "location",
+              "required": false,
+              "include_only_if_present_in_resume": true,
+              "note": "If present, create the corresponding data label; otherwise do not create this label."
+            },
+            {
+              "key": "website_links",
+              "required": false,
+              "include_only_if_present_in_resume": true,
+              "note": "If present, create the corresponding data label; otherwise do not create this label."
+            },
+            { "key": "skill_keywords", "required": false },
+            { "key": "bio", "required": false }
+          ]
+        },
+        {
+          "section_name": "work_history",
+          "condition": "If work history is contained in the resume, extract it; else skip this section entirely.",
+          "action_if_present": "extract_repeatable",
+          "repeat_rule": "Repeat for multiple work histories, adding numbering in the corresponding data labels.",
+          "fields_per_item": [
+            { "key": "role_name" },
+            { "key": "company_name" },
+            { "key": "start_time" },
+            { "key": "end_time" },
+            { "key": "descriptions" }
+          ]
+        },
+        {
+          "section_name": "education_history",
+          "condition": "If education history is contained in the resume, extract it; else skip this section entirely.",
+          "action_if_present": "extract_repeatable",
+          "repeat_rule": "Repeat for multiple education histories, adding numbering in the corresponding data labels.",
+          "fields_per_item": [
+            { "key": "degree_name" },
+            { "key": "school_name" },
+            { "key": "start_time" },
+            { "key": "end_time" },
+            { "key": "descriptions" }
+          ]
+        },
+        {
+          "section_name": "optional_sections",
+          "condition": "If any of the following additional information is contained in the resume, create corresponding data labels and extract the information into the JSON file; else skip.",
+          "action_if_present": "extract_if_present",
+          "optional_section_keys": [
+            "awards",
+            "project_experiences",
+            "certifications",
+            "volunteer_work",
+            "languages",
+            "hobbies"
+          ]
+        }
+      ]
+    },
+    "output_schema_per_resume": {
+      "output_type": "single JSON object per resume",
+      "recommended_structure": {
+        "personal_profile": {
+          "first_name": "string",
+          "last_name": "string",
+          "date_of_birth": "string (only if present)",
+          "phone_country_code": "string (only if present or separated from phone)",
+          "phone": "string",
+          "email": "string",
+          "location": "string (only if present)",
+          "website_links": ["string (only if present)"],
+          "skill_keywords": ["string"],
+          "bio": "string"
+        },
+        "work_history_1": {
+          "role_name": "string",
+          "company_name": "string",
+          "start_time": "string",
+          "end_time": "string",
+          "descriptions": "string"
+        },
+        "work_history_2": "repeat as needed",
+        "education_history_1": {
+          "degree_name": "string",
+          "school_name": "string",
+          "start_time": "string",
+          "end_time": "string",
+          "descriptions": "string"
+        },
+        "education_history_2": "repeat as needed",
+        "awards": "string (only if present)",
+        "project_experiences": "string (only if present)",
+        "certifications": "string (only if present)",
+        "volunteer_work": "string (only if present)",
+        "languages": "string (only if present)",
+        "hobbies": "string (only if present)"
+      }
     }
   }
 }

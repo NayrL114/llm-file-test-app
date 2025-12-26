@@ -243,8 +243,9 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 
   let cmd;
   try {
-    const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
-    cmd = loadCommandSpec(commandFile);
+    //const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
+    //cmd = loadCommandSpec(commandFile);
+    cmd = loadCommandSpec("extract-v1.json");
   } catch (e) {
     return res.status(400).json({ error: e.message || "Invalid command spec." });
   }
@@ -350,7 +351,8 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
-      command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
+      //command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
+      command_name: cmd.name || "extract-v1.json",
       file_name: file.originalname,
       file_mime: mime,
       file_size: file.size,
