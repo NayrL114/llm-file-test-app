@@ -37,3 +37,7 @@ dist-ssr
 # Local sqlite database
 data/
 *.db
+data/*.db
+
+# Upload folder
+uploads/

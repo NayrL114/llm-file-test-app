@@ -12,9 +12,12 @@
     "better-sqlite3": "^12.5.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "mammoth": "^1.11.0",
+    "multer": "^2.0.2",
     "openai": "^6.15.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
