@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-function App() {
+export default function App() {
   //const [count, setCount] = useState(0)
 
   // Get timestamp
@@ -19,84 +19,58 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
 
   const selected = useMemo(
-    () => history.find((h) => h.id === selectedId) || null,
+    () => history.find((h) => Number(h.id) === Number(selectedId)) || null,
     [history, selectedId]
   );
 
-  async function handleSend(){// this will handle the sent to GPT
-    
+  // Load history from DB on first page load
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch("/api/history?limit=200");
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "Failed to load history.");
+        setHistory(Array.isArray(data.items) ? data.items : []);
+      } catch (e) {
+        setError(e.message || "Failed to load history.");
+      }
+    })();
+  }, []);
+
+  async function handleSend() {
     const trimmed = prompt.trim();
     if (!trimmed || loading) return;
-    
+
     setLoading(true);
     setError("");
     setOutput("");
 
-    const id = crypto?.randomUUID?.() || String(Date.now());
-    const startedAt = performance.now();
-    const createdAt = nowIso();
-
-    // Optimistically add a pending item
-    setHistory((prev) => [
-      {
-        id,
-        createdAt,
-        prompt: trimmed,
-        response: "",
-        status: "pending", // "pending" | "success" | "error"
-        durationMs: null,
-      },
-      ...prev,
-    ]);
-    setSelectedId(id);
-
-    try{
+    try {
       const resp = await fetch("/api/chat", {
-        method: "POST", 
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({prompt: trimmed}),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: trimmed }),
       });
 
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "Request failed.");
 
-      const text = data.output || "";
-      setOutput(text);
+      if (!resp.ok) {
+        // even on error, we may receive historyItem (per server.cjs above)
+        if (data?.historyItem) {
+          setHistory((prev) => [data.historyItem, ...prev]);
+          setSelectedId(data.historyItem.id);
+        }
+        throw new Error(data?.error || "Request failed.");
+      }
 
-      const durationMs = Math.round(performance.now() - startedAt);
+      setOutput(data.output || "");
 
-      setHistory((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                response: text,
-                status: "success",
-                durationMs,
-              }
-            : item
-        )
-      );
-
+      if (data?.historyItem) {
+        setHistory((prev) => [data.historyItem, ...prev]);
+        setSelectedId(data.historyItem.id);
+      }
     } catch (e) {
-      const msg = e?.message || "Unknown error.";
-      setError(msg);
-
-      const durationMs = Math.round(performance.now() - startedAt);
-
-      setHistory((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                response: "",
-                status: "error",
-                error: msg,
-                durationMs,
-              }
-            : item
-        )
-      );
+      setError(e.message || "Unknown error.");
     } finally {
       setLoading(false);
     }
@@ -104,22 +78,50 @@ function App() {
 
   function loadHistoryItem(item) {
     setSelectedId(item.id);
-    setPrompt(item.prompt);
+    setPrompt(item.prompt || "");
     setOutput(item.response || "");
     setError(item.error || "");
   }
 
-  function clearHistory() {
-    setHistory([]);
-    setSelectedId(null);
+  async function deleteHistoryItem(id) {
+    try {
+      const resp = await fetch(`/api/history/${id}`, { method: "DELETE" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "Delete failed.");
+
+      setHistory((prev) => prev.filter((h) => Number(h.id) !== Number(id)));
+      if (Number(selectedId) === Number(id)) {
+        setSelectedId(null);
+        setOutput("");
+        setError("");
+      }
+    } catch (e) {
+      setError(e.message || "Delete failed.");
+    }
   }
+  
+
+  async function clearHistory() {
+    try {
+      const resp = await fetch("/api/history", { method: "DELETE" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "Clear failed.");
+
+      setHistory([]);
+      setSelectedId(null);
+      setOutput("");
+      setError("");
+    } catch (e) {
+      setError(e.message || "Clear failed.");
+    }
+  }
+
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
       <h1>Chat Console</h1>
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-        {/* Left: main input/output */}
         <div style={{ flex: 2, minWidth: 500 }}>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -139,24 +141,16 @@ function App() {
           {error && <p style={{ marginTop: 12 }}>{error}</p>}
 
           <h3 style={{ marginTop: 16 }}>Result</h3>
-          <pre
-            style={{
-              whiteSpace: "pre-wrap",
-              padding: 12,
-              border: "1px solid #ddd",
-              minHeight: 160,
-            }}
-          >
+          <pre style={{ whiteSpace: "pre-wrap", padding: 12, border: "1px solid #ddd", minHeight: 160 }}>
             {output || (loading ? "Waiting..." : "—")}
           </pre>
         </div>
 
-        {/* Right: history */}
-        <div style={{ flex: 1, minWidth: 320 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div style={{ flex: 1, minWidth: 360 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ marginTop: 0 }}>Request History</h3>
             <button onClick={clearHistory} disabled={history.length === 0}>
-              Clear
+              Clear All
             </button>
           </div>
 
@@ -165,34 +159,40 @@ function App() {
               <div style={{ padding: 12 }}>No requests yet.</div>
             ) : (
               history.map((item) => (
-                <button
+                <div
                   key={item.id}
-                  onClick={() => loadHistoryItem(item)}
                   style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: 12,
-                    border: "none",
                     borderBottom: "1px solid #eee",
-                    background: item.id === selectedId ? "#f6f6f6" : "white",
-                    cursor: "pointer",
+                    background: Number(item.id) === Number(selectedId) ? "#f6f6f6" : "white",
                   }}
                 >
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>
-                    {item.createdAt}
-                    {typeof item.durationMs === "number"
-                      ? ` • ${item.durationMs}ms`
-                      : ""}
-                    {" • "}
-                    {item.status}
+                  <button
+                    onClick={() => loadHistoryItem(item)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: 12,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>
+                      {item.created_at}
+                      {typeof item.duration_ms === "number" ? ` • ${item.duration_ms}ms` : ""}
+                      {" • "}
+                      {item.status}
+                    </div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>
+                      {item.prompt?.length > 60 ? item.prompt.slice(0, 60) + "…" : item.prompt}
+                    </div>
+                  </button>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 12px 12px" }}>
+                    <button onClick={() => deleteHistoryItem(item.id)}>Delete</button>
                   </div>
-                  <div style={{ fontWeight: 600, marginTop: 4 }}>
-                    {item.prompt.length > 60
-                      ? item.prompt.slice(0, 60) + "…"
-                      : item.prompt}
-                  </div>
-                </button>
+                </div>
               ))
             )}
           </div>
@@ -200,15 +200,7 @@ function App() {
           {selected && selected.response ? (
             <>
               <h4 style={{ marginTop: 12 }}>Selected Response (preview)</h4>
-              <pre
-                style={{
-                  whiteSpace: "pre-wrap",
-                  padding: 12,
-                  border: "1px solid #ddd",
-                  maxHeight: 240,
-                  overflow: "auto",
-                }}
-              >
+              <pre style={{ whiteSpace: "pre-wrap", padding: 12, border: "1px solid #ddd", maxHeight: 240, overflow: "auto" }}>
                 {selected.response}
               </pre>
             </>
@@ -219,4 +211,4 @@ function App() {
   );
 }
 
-export default App
+//export default App
