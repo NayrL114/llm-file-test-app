@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import "./App.css";
+//import "./App.css";
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "—";
@@ -80,7 +80,7 @@ function downloadJsonToDisk(obj, filenameBase = "extracted") {
   URL.revokeObjectURL(url);
 }
 
-export default function App() {
+export default function ChatConsolePage() {
   // Chat
   const [prompt, setPrompt] = useState("");
   const [output, setOutput] = useState("");

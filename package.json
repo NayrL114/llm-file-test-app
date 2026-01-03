@@ -2,33 +2,15 @@
   "name": "chatgpt-test-app",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "server": "node server.cjs",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\""
-  },
-  "dependencies": {
-    "better-sqlite3": "^12.5.0",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "mammoth": "^1.11.0",
-    "multer": "^2.0.2",
-    "openai": "^6.15.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "sharp": "^0.34.5"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:all": "concurrently \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
+    "build:frontend": "npm --prefix frontend run build",
+    "preview:frontend": "npm --prefix frontend run preview",
+    "lint:frontend": "npm --prefix frontend run lint"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "concurrently": "^9.2.1",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "vite": "^7.2.4"
+    "concurrently": "^9.2.1"
   }
 }

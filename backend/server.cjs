@@ -1,9 +1,11 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
 
 const express = require("express");
 const OpenAI = require("openai");
 const fs = require("fs");
-const path = require("path");
+// ...rest unchanged
 
 const Database = require("better-sqlite3");
 const multer = require("multer");
