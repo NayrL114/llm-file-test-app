@@ -2,13 +2,17 @@
   "name": "chatgpt-test-app",
   "private": true,
   "version": "0.0.0",
+  "workspaces": ["frontend", "backend"],
   "scripts": {
-    "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "npm --prefix backend run dev",
-    "dev:all": "concurrently \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
-    "build:frontend": "npm --prefix frontend run build",
-    "preview:frontend": "npm --prefix frontend run preview",
-    "lint:frontend": "npm --prefix frontend run lint"
+    "dev:frontend": "npm --w frontend run dev",
+    "dev:backend": "npm --w backend run dev",
+    "dev:all": "concurrently \"npm --w frontend run dev\" \"npm --prefix backend run dev\"",
+    "build:frontend": "npm --w frontend run build",
+    "preview:frontend": "npm --w frontend run preview",
+    "lint:frontend": "npm --w frontend run lint",
+    "build:backend": "npm --w backend run build",
+    "preview:backend": "npm --w backend run preview",
+    "lint:backend": "npm --w backend run lint"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
