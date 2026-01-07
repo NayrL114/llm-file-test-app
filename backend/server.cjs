@@ -13,15 +13,17 @@ const sharp = require("sharp");
 const mammoth = require("mammoth");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 // --------------------
 // OpenAI client
 // --------------------
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // --------------------
-// Local folders
+// Directories
 // --------------------
 const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
@@ -38,72 +40,40 @@ fs.mkdirSync(commandsDir, { recursive: true });
 const dbPath = path.join(dataDir, "history.db");
 const db = new Database(dbPath);
 
-// Create the base table if it doesn't exist (original columns)
 db.exec(`
   CREATE TABLE IF NOT EXISTS request_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
-    prompt TEXT NOT NULL,
+    request_type TEXT NOT NULL,
+    prompt TEXT,
     response TEXT,
-    status TEXT NOT NULL,     -- pending/success/error
+    status TEXT NOT NULL,
     error TEXT,
-    duration_ms INTEGER
+    duration_ms INTEGER,
+    command_name TEXT,
+    file_name TEXT,
+    file_mime TEXT,
+    file_size INTEGER,
+    file_path TEXT,
+    openai_file_id TEXT,
+    result_json TEXT
   );
 `);
 
-// Lightweight migration: add new columns if missing
-function ensureColumn(name, type) {
-  const cols = db.prepare(`PRAGMA table_info(request_history)`).all();
-  const exists = cols.some((c) => c.name === name);
-  if (!exists) db.exec(`ALTER TABLE request_history ADD COLUMN ${name} ${type}`);
-}
-
-ensureColumn("request_type", "TEXT");   // "chat" | "file"
-ensureColumn("command_name", "TEXT");
-ensureColumn("file_name", "TEXT");
-ensureColumn("file_mime", "TEXT");
-ensureColumn("file_size", "INTEGER");
-ensureColumn("file_path", "TEXT");
-ensureColumn("openai_file_id", "TEXT");
-ensureColumn("result_json", "TEXT");
-
-// --------------------
-// Prepared statements
-// --------------------
 const insertChatStmt = db.prepare(`
-  INSERT INTO request_history (
-    created_at, request_type, prompt, response, status, error, duration_ms
-  ) VALUES (
-    @created_at, @request_type, @prompt, @response, @status, @error, @duration_ms
-  )
+  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms)
+  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms)
 `);
 
 const insertFileStmt = db.prepare(`
-  INSERT INTO request_history (
-    created_at, request_type, prompt, response, status, error, duration_ms,
-    command_name, file_name, file_mime, file_size, file_path, openai_file_id, result_json
-  ) VALUES (
-    @created_at, @request_type, @prompt, @response, @status, @error, @duration_ms,
-    @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @result_json
-  )
+  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms,
+                               command_name, file_name, file_mime, file_size, file_path, openai_file_id, result_json)
+  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms,
+          @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @result_json)
 `);
 
 const listStmt = db.prepare(`
-  SELECT
-    id,
-    created_at,
-    COALESCE(request_type, 'chat') AS request_type,
-    prompt,
-    response,
-    status,
-    error,
-    duration_ms,
-    command_name,
-    file_name,
-    file_mime,
-    file_size,
-    openai_file_id,
-    result_json
+  SELECT *
   FROM request_history
   ORDER BY id DESC
   LIMIT @limit
@@ -133,9 +103,95 @@ function safeFilename(originalname) {
   return `${base}${ext}`;
 }
 
+// --- Fix mojibake filenames (UTF-8 bytes mis-decoded as latin1/win1252) ---
+// This is common for multipart "filename" headers, especially on Windows.
+// Strategy:
+// 1) If string already contains CJK, return as-is.
+// 2) Try reversing latin1->utf8.
+// 3) Try reversing Windows-1252->utf8 (handles the \u02DC "˜" case, etc.).
+// Only accept a decoded result if it introduces CJK characters (safe for Chinese filenames).
+const WIN1252_UNICODE_TO_BYTE = {
+  0x20ac: 0x80,
+  0x201a: 0x82,
+  0x0192: 0x83,
+  0x201e: 0x84,
+  0x2026: 0x85,
+  0x2020: 0x86,
+  0x2021: 0x87,
+  0x02c6: 0x88,
+  0x2030: 0x89,
+  0x0160: 0x8a,
+  0x2039: 0x8b,
+  0x0152: 0x8c,
+  0x017d: 0x8e,
+  0x2018: 0x91,
+  0x2019: 0x92,
+  0x201c: 0x93,
+  0x201d: 0x94,
+  0x2022: 0x95,
+  0x2013: 0x96,
+  0x2014: 0x97,
+  0x02dc: 0x98,
+  0x2122: 0x99,
+  0x0161: 0x9a,
+  0x203a: 0x9b,
+  0x0153: 0x9c,
+  0x017e: 0x9e,
+  0x0178: 0x9f,
+};
+
+function hasCJK(s) {
+  return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(String(s));
+}
+
+function encodeWin1252Bytes(str) {
+  const s = String(str || "");
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code <= 0xff) {
+      bytes[i] = code;
+      continue;
+    }
+    const mapped = WIN1252_UNICODE_TO_BYTE[code];
+    if (mapped === undefined) return null;
+    bytes[i] = mapped;
+  }
+  return bytes;
+}
+
+function normalizeFilename(name) {
+  if (!name) return name;
+
+  const s = String(name);
+  if (hasCJK(s)) return s;
+
+  // Try latin1 -> utf8 (most common)
+  try {
+    const decoded = Buffer.from(s, "latin1").toString("utf8");
+    if (hasCJK(decoded)) return decoded;
+  } catch {
+    // ignore
+  }
+
+  // Try Windows-1252 -> utf8 (handles U+02DC, smart quotes, etc.)
+  try {
+    const bytes = encodeWin1252Bytes(s);
+    if (bytes) {
+      const decoded = Buffer.from(bytes).toString("utf8");
+      if (hasCJK(decoded)) return decoded;
+    }
+  } catch {
+    // ignore
+  }
+
+  return s;
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => cb(null, safeFilename(file.originalname)),
+  filename: (req, file, cb) =>
+    cb(null, safeFilename(normalizeFilename(file.originalname))),
 });
 
 // 50MB cap (aligns with common OpenAI file size constraints and good hygiene)
@@ -144,15 +200,14 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-function loadCommandSpec(commandFile = "extract-v1.json") {
-  // prevent path traversal; only allow filename
-  const safe = path.basename(commandFile);
+// --------------------
+// Command loader
+// --------------------
+function loadCommand(commandName) {
+  const safe = path.basename(commandName);
   const cmdPath = path.join(commandsDir, safe);
-
   if (!fs.existsSync(cmdPath)) {
-    throw new Error(
-      `Command spec not found: ${safe}. Create it under ./commands/${safe}`
-    );
+    throw new Error(`Command file not found: ${safe}`);
   }
 
   const raw = fs.readFileSync(cmdPath, "utf8");
@@ -169,7 +224,8 @@ function loadCommandSpec(commandFile = "extract-v1.json") {
 
 // Utilities
 function asDataUrl(buffer, mime) {
-  return `data:${mime};base64,${buffer.toString("base64")}`;
+  const b64 = buffer.toString("base64");
+  return `data:${mime};base64,${b64}`;
 }
 
 function isImageExtOrMime(ext, mime) {
@@ -246,13 +302,17 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
   let cmd;
   try {
     //const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
-    //cmd = loadCommandSpec(commandFile);
-    cmd = loadCommandSpec("extract-v1.json");
-  } catch (e) {
-    return res.status(400).json({ error: e.message || "Invalid command spec." });
+    const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
+    cmd = loadCommand(commandFile);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
-  const ext = path.extname(file.originalname || "").toLowerCase();
+  // normalize original filename (fix mojibake)
+  const originalName = normalizeFilename(String(file.originalname || ""));
+
+  //const ext = path.extname(file.originalname || "").toLowerCase();
+  const ext = path.extname(originalName || "").toLowerCase();
   const mime = file.mimetype || "";
 
   // Allow only your stated types
@@ -269,17 +329,16 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
     });
   }
 
+  // Build content parts for OpenAI Responses API (input_file / input_text / input_image)
+  const contentParts = [];
   let openaiFileId = null;
 
   try {
-    // Build content parts for Responses
-    const contentParts = [];
-
     if (isPdf) {
-      // Upload PDF to OpenAI and reference by file_id
+      // Upload file to OpenAI
       const uploaded = await client.files.create({
         file: fs.createReadStream(file.path),
-        purpose: "user_data",
+        purpose: "assistants",
       });
       openaiFileId = uploaded.id;
 
@@ -348,14 +407,14 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
     const info = insertFileStmt.run({
       created_at: createdAt,
       request_type: "file",
-      prompt: `Analyze file: ${file.originalname}`,
+      prompt: `Analyze file: ${originalName}`,
       response: null,
       status: "success",
       error: null,
       duration_ms: durationMs,
       //command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
       command_name: cmd.name || "extract-v1.json",
-      file_name: file.originalname,
+      file_name: originalName,
       file_mime: mime,
       file_size: file.size,
       file_path: file.path,
@@ -369,18 +428,19 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         id: info.lastInsertRowid,
         created_at: createdAt,
         request_type: "file",
-        prompt: `Analyze file: ${file.originalname}`,
+        prompt: `Analyze file: ${originalName}`,
         status: "success",
         error: null,
         duration_ms: durationMs,
         command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
-        file_name: file.originalname,
+        file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         openai_file_id: openaiFileId,
         result_json: JSON.stringify(parsed),
       },
     });
+
   } catch (err) {
     console.error(err);
     const durationMs = Date.now() - startedAt;
@@ -390,13 +450,13 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       const info = insertFileStmt.run({
         created_at: createdAt,
         request_type: "file",
-        prompt: `Analyze file: ${file.originalname}`,
+        prompt: `Analyze file: ${originalName}`,
         response: null,
         status: "error",
         error: err?.message || "Analyze failed.",
         duration_ms: durationMs,
         command_name: cmd?.name || path.basename(req.body?.command || "extract-v1.json"),
-        file_name: file.originalname,
+        file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         file_path: file.path,
@@ -410,18 +470,19 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           id: info.lastInsertRowid,
           created_at: createdAt,
           request_type: "file",
-          prompt: `Analyze file: ${file.originalname}`,
+          prompt: `Analyze file: ${originalName}`,
           status: "error",
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
           command_name: cmd?.name || path.basename(req.body?.command || "extract-v1.json"),
-          file_name: file.originalname,
+          file_name: originalName,
           file_mime: mime,
           file_size: file.size,
           openai_file_id: openaiFileId,
           result_json: null,
         },
       });
+
     } catch (dbErr) {
       console.error("Failed to persist error history:", dbErr);
       return res.status(500).json({ error: err?.message || "Analyze failed." });
@@ -430,39 +491,56 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 });
 
 // --------------------
-// API: load history
+// API: history list
 // --------------------
 app.get("/api/history", (req, res) => {
   const limit = Math.min(Number(req.query.limit || 200), 1000);
   const rows = listStmt.all({ limit });
-  res.json({ items: rows });
+
+  // Repair already-saved mojibake rows at read-time (so old entries display correctly too)
+  const fixed = rows.map((r) => {
+    const out = { ...r };
+
+    if (out.file_name) out.file_name = normalizeFilename(String(out.file_name));
+
+    // If prompt follows your own template, repair the embedded filename too
+    if (typeof out.prompt === "string" && out.prompt.startsWith("Analyze file: ")) {
+      const namePart = out.prompt.slice("Analyze file: ".length);
+      out.prompt = `Analyze file: ${normalizeFilename(String(namePart))}`;
+    }
+
+    return out;
+  });
+
+  res.json({ items: fixed });
 });
 
 // --------------------
-// API: delete one history record (also deletes uploaded file if present)
+// API: delete single history item
 // --------------------
 app.delete("/api/history/:id", (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id." });
-
   const row = getOneForDeleteStmt.get(id);
-  if (row?.file_path) {
+  if (!row) return res.status(404).json({ error: "Not found." });
+
+  // delete local upload if present
+  if (row.file_path) {
     try {
       if (fs.existsSync(row.file_path)) fs.unlinkSync(row.file_path);
     } catch (e) {
-      // Non-fatal; we still delete DB row
       console.error("Failed to delete local upload:", e);
     }
   }
 
-  const info = deleteOneStmt.run(id);
-  res.json({ deleted: info.changes > 0 });
+  deleteOneStmt.run(id);
+  res.json({ ok: true });
 });
 
 // --------------------
-// API: clear all history (also deletes all uploaded files recorded in DB)
+// API: clear all history
 // --------------------
 app.delete("/api/history", (req, res) => {
+  // delete all uploaded files tracked in DB
   const fileRows = listFilePathsStmt.all();
   for (const r of fileRows) {
     if (!r.file_path) continue;
