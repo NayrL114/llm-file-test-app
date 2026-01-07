@@ -40,3 +40,15 @@
 .read-the-docs {
   color: #888;
 }
+
+html, body {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    "PingFang SC",
+    sans-serif;
+}
