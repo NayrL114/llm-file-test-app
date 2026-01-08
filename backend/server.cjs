@@ -4,6 +4,22 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
 const OpenAI = require("openai");
+
+// Use global fetch when available (Node 18+). If not available, provider calls will error with instructions.
+const fetch = globalThis.fetch;
+if (!fetch) {
+  console.warn(
+    "Global fetch not available. Claude/Gemini provider calls require Node 18+ or a fetch polyfill. Set up a global fetch or install a compatible fetch polyfill."
+  );
+}
+
+// Provider API keys (set in backend/.env or environment)
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+
+// Optional provider model overrides
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL || "gemini-2.5-flash";
 const fs = require("fs");
 // ...rest unchanged
 
@@ -56,20 +72,33 @@ db.exec(`
     file_size INTEGER,
     file_path TEXT,
     openai_file_id TEXT,
+    model TEXT,
     result_json TEXT
   );
 `);
 
+// Ensure 'model' column exists for older databases (migration)
+try {
+  const cols = db.prepare("PRAGMA table_info(request_history)").all();
+  const hasModelColumn = cols.some((c) => c && c.name === "model");
+  if (!hasModelColumn) {
+    db.exec(`ALTER TABLE request_history ADD COLUMN model TEXT`);
+  }
+} catch (e) {
+  // If migration fails, log but continue — DB will still operate without the column.
+  console.error("Failed to ensure 'model' column exists:", e);
+} 
+
 const insertChatStmt = db.prepare(`
-  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms)
-  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms)
+  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms, model)
+  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms, @model)
 `);
 
 const insertFileStmt = db.prepare(`
   INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms,
-                               command_name, file_name, file_mime, file_size, file_path, openai_file_id, result_json)
+                               command_name, file_name, file_mime, file_size, file_path, openai_file_id, model, result_json)
   VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms,
-          @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @result_json)
+          @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @model, @result_json)
 `);
 
 const listStmt = db.prepare(`
@@ -237,22 +266,153 @@ function isImageExtOrMime(ext, mime) {
 }
 
 // --------------------
-// API: chat (existing)
+// Provider helpers
+// --------------------
+
+// Replace the callAnthropic function in server.cjs with this:
+
+async function callAnthropic(prompt) {
+  if (!ANTHROPIC_API_KEY) throw new Error('Missing ANTHROPIC_API_KEY');
+  if (typeof fetch !== 'function') {
+    throw new Error('Global fetch is not available in this Node runtime; install a fetch polyfill or use Node 18+ to use Anthropic provider.');
+  }
+
+  // Use modern Messages API endpoint
+  const url = 'https://api.anthropic.com/v1/messages';
+  
+  // Update to use a current Claude model
+  const model = ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+  
+  const body = {
+    model: model,
+    max_tokens: 1024,
+    messages: [
+      {
+        role: 'user',
+        content: String(prompt)
+      }
+    ]
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'  // Required header
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Anthropic API error: ${resp.status} ${txt}`);
+  }
+
+  const json = await resp.json();
+  
+  // Modern API returns content in this structure
+  if (json.content && Array.isArray(json.content) && json.content.length > 0) {
+    return json.content[0].text || '';
+  }
+  
+  // Fallback
+  return JSON.stringify(json);
+}
+
+
+async function callGemini(prompt) {
+  if (!GOOGLE_API_KEY) throw new Error('Missing GOOGLE_API_KEY');
+  if (typeof fetch !== 'function') throw new Error('Global fetch is not available. Use Node 18+');
+
+  // Use a modern Gemini model default
+  const model = GOOGLE_MODEL || 'gemini-1.5-flash';
+  
+  // Modern Gemini models use the v1 or v1beta endpoint
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
+
+  const body = {
+    contents: [{
+      parts: [{ text: String(prompt) }]
+    }]
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Google Gemini API error: ${resp.status} ${text}`);
+  }
+
+  const json = JSON.parse(text);
+
+  // Gemini response structure: candidates[0].content.parts[0].text
+  if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+    return json.candidates[0].content.parts[0].text;
+  }
+
+  return JSON.stringify(json);
+}
+
+
+// --------------------
+// API: chat (supports model selection)
 // --------------------
 app.post("/api/chat", async (req, res) => {
   try {
     const prompt = String(req.body?.prompt ?? "").trim();
     if (!prompt) return res.status(400).json({ error: "Missing prompt." });
 
+    // model key expected from frontend: 'chatgpt', 'gemini', or 'claude'. Default to chatgpt for legacy calls.
+    const modelKey = String(req.body?.model || "chatgpt");
+
     const createdAt = new Date().toISOString();
     const startedAt = Date.now();
 
-    const response = await client.responses.create({
-      model: "gpt-5.2",
-      input: prompt,
-    });
+    // Route to provider-specific callers
+    let outputText = "";
+    try {
+      if (modelKey === 'claude') {
+        outputText = await callAnthropic(prompt);
+      } else if (modelKey === 'gemini') {
+        outputText = await callGemini(prompt);
+      } else {
+        // Default / ChatGPT via OpenAI
+        const response = await client.responses.create({ model: 'gpt-5.2', input: prompt });
+        outputText = response.output_text || "";
+      }
+    } catch (provErr) {
+      const durationMs = Date.now() - startedAt;
 
-    const outputText = response.output_text || "";
+      // Persist error run
+      const infoErr = insertChatStmt.run({
+        created_at: createdAt,
+        request_type: "chat",
+        prompt,
+        response: null,
+        status: "error",
+        error: provErr?.message || String(provErr),
+        duration_ms: durationMs,
+        model: modelKey,
+      });
+
+      console.error("Provider call failed:", provErr);
+      return res.status(500).json({ error: provErr?.message || "Provider call failed.", historyItem: {
+        id: infoErr.lastInsertRowid,
+        created_at: createdAt,
+        request_type: "chat",
+        prompt,
+        status: "error",
+        error: provErr?.message || String(provErr),
+        duration_ms: durationMs,
+        model: modelKey,
+      }});
+    }
+
     const durationMs = Date.now() - startedAt;
 
     const info = insertChatStmt.run({
@@ -263,6 +423,7 @@ app.post("/api/chat", async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
+      model: modelKey,
     });
 
     res.json({
@@ -276,6 +437,7 @@ app.post("/api/chat", async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
+        model: modelKey,
       },
     });
   } catch (err) {
@@ -419,6 +581,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       file_size: file.size,
       file_path: file.path,
       openai_file_id: openaiFileId,
+      model: cmd.model || null,
       result_json: JSON.stringify(parsed),
     });
 
@@ -433,6 +596,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         error: null,
         duration_ms: durationMs,
         command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
+        model: cmd.model || null,
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
@@ -461,6 +625,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         file_size: file.size,
         file_path: file.path,
         openai_file_id: openaiFileId,
+        model: cmd?.model || null,
         result_json: null,
       });
 
@@ -475,6 +640,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
           command_name: cmd?.name || path.basename(req.body?.command || "extract-v1.json"),
+          model: cmd?.model || null,
           file_name: originalName,
           file_mime: mime,
           file_size: file.size,
@@ -554,5 +720,44 @@ app.delete("/api/history", (req, res) => {
   deleteAllStmt.run();
   res.json({ ok: true });
 });
+
+// Validate runtime configuration and warn about missing keys or inconsistent settings
+function validateConfig() {
+  const warnings = [];
+
+  if (!process.env.OPENAI_API_KEY) {
+    warnings.push("OPENAI_API_KEY is not set. OpenAI-based ChatGPT calls will fail.");
+  }
+
+  if (ANTHROPIC_API_KEY && typeof fetch !== 'function') {
+    warnings.push("ANTHROPIC_API_KEY is set but global fetch is not available in this Node runtime. Install a fetch polyfill or use Node 18+ to enable Anthropic (Claude) provider.");
+  }
+
+  if (GOOGLE_API_KEY && typeof fetch !== 'function') {
+    warnings.push("GOOGLE_API_KEY is set but global fetch is not available in this Node runtime. Install a fetch polyfill or use Node 18+ to enable Google Gemini provider.");
+  }
+
+  if (ANTHROPIC_MODEL && !ANTHROPIC_API_KEY) {
+    warnings.push("ANTHROPIC_MODEL is set but ANTHROPIC_API_KEY is not set — Claude provider will not work without the key.");
+  }
+
+  if (GOOGLE_MODEL && !GOOGLE_API_KEY) {
+    warnings.push("GOOGLE_MODEL is set but GOOGLE_API_KEY is not set — Gemini provider will not work without the key.");
+  }
+
+  if (!ANTHROPIC_API_KEY && !GOOGLE_API_KEY && !process.env.OPENAI_API_KEY) {
+    warnings.push("No provider API keys are configured. The server will not be able to make external model calls.");
+  }
+
+  if (warnings.length > 0) {
+    console.warn("\n=== Configuration warnings ===");
+    for (const w of warnings) console.warn("- " + w);
+    console.warn("=== End configuration warnings ===\n");
+  } else {
+    console.log("Configuration OK: provider keys and runtime sanity checks passed.");
+  }
+}
+
+validateConfig();
 
 app.listen(3001, () => console.log("API server running on http://localhost:3001"));
