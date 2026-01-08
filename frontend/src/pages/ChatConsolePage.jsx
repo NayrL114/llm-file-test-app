@@ -242,7 +242,7 @@ export default function ChatConsolePage() {
             </div>
           ))}
 
-          {/* Selected Request History Preview. */}
+          {/* Selected Request History Preview. 
           <h4 style={{ marginTop: 12 }}>Selected Request History Preview. </h4>
 
           <pre
@@ -256,6 +256,7 @@ export default function ChatConsolePage() {
           >
             {selected ? selected.response || "—" : "—"}
           </pre>
+          */}
 
         </div>
 
