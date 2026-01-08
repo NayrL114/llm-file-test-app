@@ -334,7 +334,7 @@ async function callGemini(prompt) {
   if (typeof fetch !== "function")
     throw new Error("Global fetch is not available. Use Node 18+");
 
-  const model = GOOGLE_MODEL || "gemini-1.5-flash";
+  const model = GOOGLE_MODEL || "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
 
   const body = {
@@ -434,6 +434,136 @@ async function callGPTWithJsonSchema(cmd, contentParts) {
   return { jsonText, parsed, responseId: response.id };
 }
 
+/**
+ * NEW: Implementation for Google Gemini using response_schema.
+ */
+// --- UPDATED Gemini Helper ---
+async function callGeminiWithJsonSchema(cmd, parts) {
+  if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured.");
+
+  const geminiParts = [];
+  for (const part of parts) {
+    if (part.type === "input_text") {
+      geminiParts.push({ text: part.text });
+    } else if (part.type === "input_image") {
+      const [header, b64] = part.image_url.split(",");
+      const mime = header.split(";")[0].split(":")[1];
+      geminiParts.push({ inline_data: { mime_type: mime, data: b64 } });
+    } else if (part.type === "input_file" && part.localPath) {
+      // FIX: Read the actual file bytes from the upload directory
+      const fileBuffer = fs.readFileSync(part.localPath);
+      geminiParts.push({
+        inline_data: {
+          mime_type: "application/pdf",
+          data: fileBuffer.toString("base64"),
+        },
+      });
+    }
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: cmd.system }] },
+      contents: [{ role: "user", parts: geminiParts }],
+      generationConfig: {
+        response_mime_type: "application/json",
+        response_schema: cmd.schema, // Uses the schema from resume-extract-v1.json
+      },
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Gemini API Error: ${data.error.message}`);
+  
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  return { output: JSON.parse(text) };
+}
+
+/**
+ * NEW: Implementation for Anthropic (Claude) using Structured Outputs.
+ * This uses the 'output_format' beta feature.
+ */
+async function callClaudeWithJsonSchema(cmd, parts) {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured.");
+
+  const messages = [{
+    role: "user",
+    content: parts.map(p => {
+      if (p.type === "input_text") {
+        return { type: "text", text: p.text };
+      }
+      if (p.type === "input_image") {
+        const [header, b64] = p.image_url.split(",");
+        const mime = header.split(";")[0].split(":")[1];
+        return { 
+          type: "image", 
+          source: { type: "base64", media_type: mime, data: b64 } 
+        };
+      }
+      if (p.type === "input_file" && p.localPath) {
+        const fileBuffer = fs.readFileSync(p.localPath);
+        return {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: fileBuffer.toString("base64")
+          }
+        };
+      }
+      return null;
+    }).filter(Boolean)
+  }];
+
+  const url = "https://api.anthropic.com/v1/messages";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      system: cmd.system,
+      messages: messages,
+      max_tokens: 4096,
+      tools: [{
+        name: "extract_resume",
+        description: "Extract structured resume information from the document",
+        input_schema: cmd.schema
+      }],
+      tool_choice: { type: "tool", name: "extract_resume" }
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Claude API Error: ${data.error.message}`);
+  
+  // Find the tool use in the response
+  const toolUse = data.content.find(block => block.type === "tool_use");
+  if (!toolUse) {
+    throw new Error("Claude did not return a tool use response");
+  }
+  
+  return { output: toolUse.input };
+}
+
+// --------------------
+// API: chat (supports model selection)
+// --------------------
+//
+// Frontend should send JSON:
+// - prompt: string
+// - model: 'chatgpt' | 'gemini' | 'claude'   (optional, defaults to 'chatgpt')
+//
+/**
+ * UPDATED: The /api/analyze-file route now switches based on the provider.
+ */
 // --------------------
 // API: chat (supports model selection)
 // --------------------
@@ -528,6 +658,7 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+
 // --------------------
 // API: analyze file
 // --------------------
@@ -536,6 +667,9 @@ app.post("/api/chat", async (req, res) => {
 // - field name: "file"
 // - optional field: "command" (e.g. extract-v1.json)
 //
+// --------------------
+// API: analyze file
+// --------------------
 app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: "Missing file." });
@@ -545,36 +679,21 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 
   let cmd;
   try {
-    // Default command file if not specified by frontend
-    const commandFile = req.body?.command
-      ? String(req.body.command)
-      : "extract-v1.json";
-
-    // Ensure we only ever use a safe basename (no path traversal)
+    const commandFile = req.body?.command || "resume-extract-v1.json";
     const commandFileSafe = path.basename(commandFile);
-
     cmd = loadCommand(commandFileSafe);
-
-    // Stash for later use in this handler scope
-    req._commandFileSafe = commandFileSafe;
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 
-  const commandFileSafe = req._commandFileSafe || "extract-v1.json";
-
-  // Normalize original filename (fix mojibake)
+  const provider = req.body?.provider || "openai";
   const originalName = normalizeFilename(String(file.originalname || ""));
-
   const ext = path.extname(originalName || "").toLowerCase();
   const mime = file.mimetype || "";
 
-  // Allow only your stated types
+  // Validate file type
   const isPdf = ext === ".pdf" || mime === "application/pdf";
-  const isDocx =
-    ext === ".docx" ||
-    mime ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const isDocx = ext === ".docx" || mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const isTxt = ext === ".txt" || mime.startsWith("text/");
   const isImg = isImageExtOrMime(ext, mime);
 
@@ -584,22 +703,24 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
     });
   }
 
-  // Build content parts for OpenAI Responses API (input_file / input_text / input_image)
-  const contentParts = [];
+  let contentParts = [{ type: "input_text", text: cmd.user_prompt }];
   let openaiFileId = null;
 
   try {
+    // Handle different file types
     if (isPdf) {
-      // Upload file to OpenAI
-      const uploaded = await client.files.create({
-        file: fs.createReadStream(file.path),
-        purpose: "assistants",
-      });
-      openaiFileId = uploaded.id;
-
-      contentParts.push({ type: "input_file", file_id: openaiFileId });
+      if (provider === "openai") {
+        const uploaded = await client.files.create({
+          file: fs.createReadStream(file.path),
+          purpose: "assistants",
+        });
+        openaiFileId = uploaded.id;
+        contentParts.push({ type: "input_file", file_id: openaiFileId });
+      } else {
+        // For Gemini and Claude, pass localPath
+        contentParts.push({ type: "input_file", localPath: file.path });
+      }
     } else if (isDocx) {
-      // Extract DOCX text server-side
       const result = await mammoth.extractRawText({ path: file.path });
       const text = (result.value || "").trim();
       contentParts.push({
@@ -607,46 +728,39 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         text: text || "(DOCX contained no extractable text.)",
       });
     } else if (isTxt) {
-      // Read text file
       const text = fs.readFileSync(file.path, "utf8");
       contentParts.push({ type: "input_text", text });
     } else if (isImg) {
-      // Image: normalize WEBP/AVIF to PNG for better downstream handling
       let buf = fs.readFileSync(file.path);
       let outMime = mime;
 
-      if (
-        ext === ".webp" ||
-        ext === ".avif" ||
-        mime === "image/webp" ||
-        mime === "image/avif"
-      ) {
+      if (ext === ".webp" || ext === ".avif" || mime === "image/webp" || mime === "image/avif") {
         buf = await sharp(buf).png().toBuffer();
         outMime = "image/png";
       } else if (mime === "image/jpg") {
         outMime = "image/jpeg";
       }
 
-      // Send image as base64 data URL
       contentParts.push({
         type: "input_image",
         image_url: asDataUrl(buf, outMime || "image/png"),
       });
     }
 
-    // Append command prompt from backend (this is what tells the model what to extract)
-    contentParts.push({
-      type: "input_text",
-      text:
-        cmd.user_prompt ||
-        "Extract the required information from the provided input.",
-    });
-
-    // Centralized schema call (OpenAI)
-    const { parsed } = await callGPTWithJsonSchema(cmd, contentParts);
+    // Call the appropriate provider
+    let result;
+    if (provider === "gemini") {
+      result = await callGeminiWithJsonSchema(cmd, contentParts);
+    } else if (provider === "claude") {
+      result = await callClaudeWithJsonSchema(cmd, contentParts);
+    } else {
+      const response = await callGPTWithJsonSchema(cmd, contentParts);
+      result = { output: response.parsed };
+    }
 
     const durationMs = Date.now() - startedAt;
 
+    // Save to database
     const info = insertFileStmt.run({
       created_at: createdAt,
       request_type: "file",
@@ -655,18 +769,18 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
-      command_name: cmd.name || commandFileSafe,
+      command_name: cmd.name || "resume-extract-v1",
       file_name: originalName,
       file_mime: mime,
       file_size: file.size,
       file_path: file.path,
       openai_file_id: openaiFileId,
-      model: cmd.model || null,
-      result_json: JSON.stringify(parsed),
+      model: provider,
+      result_json: JSON.stringify(result.output),
     });
 
     res.json({
-      result: parsed,
+      result: result.output,
       historyItem: {
         id: info.lastInsertRowid,
         created_at: createdAt,
@@ -675,20 +789,20 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
-        command_name: cmd.name || commandFileSafe,
-        model: cmd.model || null,
+        command_name: cmd.name || "resume-extract-v1",
+        model: provider,
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         openai_file_id: openaiFileId,
-        result_json: JSON.stringify(parsed),
+        result_json: JSON.stringify(result.output),
       },
     });
   } catch (err) {
-    console.error(err);
+    console.error("Analysis Error:", err);
     const durationMs = Date.now() - startedAt;
 
-    // Store error run too (so it appears in history)
+    // Store error in history
     try {
       const info = insertFileStmt.run({
         created_at: createdAt,
@@ -698,13 +812,13 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "error",
         error: err?.message || "Analyze failed.",
         duration_ms: durationMs,
-        command_name: cmd?.name || commandFileSafe,
+        command_name: cmd?.name || "resume-extract-v1",
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         file_path: file.path,
         openai_file_id: openaiFileId,
-        model: cmd?.model || null,
+        model: provider,
         result_json: null,
       });
 
@@ -718,8 +832,8 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           status: "error",
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
-          command_name: cmd?.name || commandFileSafe,
-          model: cmd?.model || null,
+          command_name: cmd?.name || "resume-extract-v1",
+          model: provider,
           file_name: originalName,
           file_mime: mime,
           file_size: file.size,
@@ -730,6 +844,11 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
     } catch (dbErr) {
       console.error("Failed to persist error history:", dbErr);
       return res.status(500).json({ error: err?.message || "Analyze failed." });
+    }
+  } finally {
+    // Clean up uploaded file
+    if (file && fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path);
     }
   }
 });

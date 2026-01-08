@@ -18,7 +18,7 @@ export default function ChatConsolePage() {
   const [outputs, setOutputs] = useState(initialOutputs);
 
   const modelOrder = ["chatgpt", "gemini", "claude"];
-  const modelLabels = { chatgpt: "ChatGPT", gemini: "Gemini", claude: "Claude" };
+  const modelLabels = { chatgpt: "ChatGPT 5.2", gemini: "Gemini 2.5 Flash", claude: "Claude Sonnet 4" };
 
   // Which models are selected (multiple selection allowed). Default: ChatGPT selected.
   const [selectedModels, setSelectedModels] = useState({ chatgpt: true, gemini: false, claude: false });
