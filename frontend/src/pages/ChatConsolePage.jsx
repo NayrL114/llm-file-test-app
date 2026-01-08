@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-//import "./App.css";
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "—";
@@ -80,6 +79,11 @@ function downloadJsonToDisk(obj, filenameBase = "extracted") {
   URL.revokeObjectURL(url);
 }
 
+function isChatHistoryItem(item) {
+  const t = item?.request_type || "chat";
+  return t !== "file";
+}
+
 export default function ChatConsolePage() {
   // Chat
   const [prompt, setPrompt] = useState("");
@@ -96,7 +100,7 @@ export default function ChatConsolePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Persisted request history (from DB)
+  // Persisted request history (from DB) - CHAT ONLY on this page
   const [history, setHistory] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
 
@@ -110,14 +114,16 @@ export default function ChatConsolePage() {
     return jsonToRows(jsonResult);
   }, [jsonResult]);
 
-  // Load history from DB on first page load
+  // Load history from DB on first page load (CHAT ONLY)
   useEffect(() => {
     (async () => {
       try {
         const resp = await fetch("/api/history?limit=200");
         const data = await resp.json();
         if (!resp.ok) throw new Error(data?.error || "Failed to load history.");
-        setHistory(Array.isArray(data.items) ? data.items : []);
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        setHistory(items.filter(isChatHistoryItem));
       } catch (e) {
         setError(e?.message || "Failed to load history.");
       }
@@ -143,7 +149,8 @@ export default function ChatConsolePage() {
       const data = await resp.json();
 
       if (!resp.ok) {
-        if (data?.historyItem) {
+        // Only track chat items in this panel
+        if (data?.historyItem && isChatHistoryItem(data.historyItem)) {
           setHistory((prev) => [data.historyItem, ...prev]);
           setSelectedId(data.historyItem.id);
         }
@@ -152,7 +159,8 @@ export default function ChatConsolePage() {
 
       setOutput(data.output || "");
 
-      if (data?.historyItem) {
+      // Only track chat items in this panel
+      if (data?.historyItem && isChatHistoryItem(data.historyItem)) {
         setHistory((prev) => [data.historyItem, ...prev]);
         setSelectedId(data.historyItem.id);
       }
@@ -184,19 +192,13 @@ export default function ChatConsolePage() {
       const data = await resp.json();
 
       if (!resp.ok) {
-        if (data?.historyItem) {
-          setHistory((prev) => [data.historyItem, ...prev]);
-          setSelectedId(data.historyItem.id);
-        }
+        // Do NOT add FILE items to CHAT history panel
         throw new Error(data?.error || "File analysis failed.");
       }
 
       setJsonResult(data.result ?? null);
 
-      if (data?.historyItem) {
-        setHistory((prev) => [data.historyItem, ...prev]);
-        setSelectedId(data.historyItem.id);
-      }
+      // Do NOT add FILE items to CHAT history panel
     } catch (e) {
       setError(e?.message || "File analysis failed.");
     } finally {
@@ -215,8 +217,8 @@ export default function ChatConsolePage() {
     setSelectedId(item.id);
     setError(item.error || "");
 
+    // This page only shows chat items, but keep it defensive.
     const reqType = item.request_type || "chat";
-
     if (reqType === "file" || item.result_json) {
       setPrompt("");
       setOutput("");
@@ -230,11 +232,12 @@ export default function ChatConsolePage() {
       } else {
         setJsonResult(null);
       }
-    } else {
-      setPrompt(item.prompt || "");
-      setOutput(item.response || "");
-      setJsonResult(null);
+      return;
     }
+
+    setPrompt(item.prompt || "");
+    setOutput(item.response || "");
+    setJsonResult(null);
   }
 
   async function deleteHistoryItem(id) {
@@ -257,11 +260,21 @@ export default function ChatConsolePage() {
     }
   }
 
-  async function clearHistory() {
+  // Clear only the items shown in THIS panel (CHAT-only),
+  // without calling the global DELETE /api/history which would wipe FILE history too.
+  async function clearHistoryPanel() {
+    if (history.length === 0) return;
+
+    setLoading(true);
+    setError("");
     try {
-      const resp = await fetch("/api/history", { method: "DELETE" });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "Clear failed.");
+      for (const item of history) {
+        const resp = await fetch(`/api/history/${item.id}`, { method: "DELETE" });
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data?.error || `Failed clearing id=${item.id}`);
+        }
+      }
 
       setHistory([]);
       setSelectedId(null);
@@ -271,15 +284,12 @@ export default function ChatConsolePage() {
       setError("");
     } catch (e) {
       setError(e?.message || "Clear failed.");
+    } finally {
+      setLoading(false);
     }
   }
 
   function renderHistoryTitle(item) {
-    const reqType = item.request_type || "chat";
-    if (reqType === "file") {
-      const name = item.file_name || "(file)";
-      return `FILE: ${name}`;
-    }
     return item.prompt || "(chat)";
   }
 
@@ -464,18 +474,18 @@ export default function ChatConsolePage() {
           </div>
         </div>
 
-        {/* Right side: history */}
+        {/* Right side: CHAT history */}
         <div style={{ flex: 1, minWidth: 400 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ marginTop: 0 }}>Request History</h3>
-            <button onClick={clearHistory} disabled={history.length === 0}>
-              Clear All
+            <h3 style={{ marginTop: 0 }}>Request History (Chat)</h3>
+            <button onClick={clearHistoryPanel} disabled={loading || history.length === 0}>
+              Clear All (Chat)
             </button>
           </div>
 
           <div style={{ border: "1px solid #ddd" }}>
             {history.length === 0 ? (
-              <div style={{ padding: 12 }}>No requests yet.</div>
+              <div style={{ padding: 12 }}>No chat requests yet.</div>
             ) : (
               history.map((item) => (
                 <div
@@ -513,18 +523,12 @@ export default function ChatConsolePage() {
                         return title.length > 70 ? title.slice(0, 70) + "…" : title;
                       })()}
                     </div>
-
-                    {(item.request_type === "file" || item.file_name) && (
-                      <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                        {item.file_name ? `File: ${item.file_name}` : ""}
-                        {Number.isFinite(item.file_size) ? ` • ${formatBytes(item.file_size)}` : ""}
-                        {item.file_mime ? ` • ${item.file_mime}` : ""}
-                      </div>
-                    )}
                   </button>
 
                   <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 12px 12px" }}>
-                    <button onClick={() => deleteHistoryItem(item.id)}>Delete</button>
+                    <button onClick={() => deleteHistoryItem(item.id)} disabled={loading}>
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))
@@ -536,38 +540,17 @@ export default function ChatConsolePage() {
             <>
               <h4 style={{ marginTop: 12 }}>Selected Item Preview</h4>
 
-              {selected.request_type === "file" || selected.result_json ? (
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    padding: 12,
-                    border: "1px solid #ddd",
-                    maxHeight: 260,
-                    overflow: "auto",
-                  }}
-                >
-                  {(() => {
-                    if (!selected.result_json) return "—";
-                    try {
-                      return JSON.stringify(JSON.parse(selected.result_json), null, 2);
-                    } catch {
-                      return selected.result_json;
-                    }
-                  })()}
-                </pre>
-              ) : (
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    padding: 12,
-                    border: "1px solid #ddd",
-                    maxHeight: 260,
-                    overflow: "auto",
-                  }}
-                >
-                  {selected.response || "—"}
-                </pre>
-              )}
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  padding: 12,
+                  border: "1px solid #ddd",
+                  maxHeight: 260,
+                  overflow: "auto",
+                }}
+              >
+                {selected.response || "—"}
+              </pre>
             </>
           ) : null}
         </div>
