@@ -1,83 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-//import "./App.css";
+import { useEffect, useMemo, useState } from "react";
 
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "—";
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const value = bytes / Math.pow(k, i);
-  return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
-}
+// File-analysis helpers removed: formatBytes, jsonToRows, downloadJsonToDisk
+// JSON/table download and file-size formatting are not used on the Chat Console page anymore.
 
-/**
- * Convert JSON to vertical rows: { path, value }
- * - Objects become dot paths (a.b.c)
- * - Arrays become bracket paths (arr[0].x)
- * - Primitive values become strings
- */
-function jsonToRows(data) {
-  const rows = [];
 
-  function walk(value, path) {
-    if (value === null || typeof value !== "object") {
-      rows.push({
-        path: path || "(root)",
-        value: value === undefined ? "" : String(value),
-      });
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      if (value.length === 0) {
-        rows.push({ path: path || "(root)", value: "[]" });
-        return;
-      }
-      value.forEach((item, idx) => {
-        const nextPath = path ? `${path}[${idx}]` : `[${idx}]`;
-        walk(item, nextPath);
-      });
-      return;
-    }
-
-    const keys = Object.keys(value);
-    if (keys.length === 0) {
-      rows.push({ path: path || "(root)", value: "{}" });
-      return;
-    }
-
-    keys.forEach((k) => {
-      const nextPath = path ? `${path}.${k}` : k;
-      walk(value[k], nextPath);
-    });
-  }
-
-  walk(data, "");
-  return rows;
-}
-
-function downloadJsonToDisk(obj, filenameBase = "extracted") {
-  const safeBase = (filenameBase || "extracted")
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
-    .slice(0, 80);
-
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `${safeBase}-${ts}.json`;
-
-  const blob = new Blob([JSON.stringify(obj, null, 2)], {
-    type: "application/json;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
+function isChatHistoryItem(item) {
+  const t = item?.request_type || "chat";
+  return t !== "file";
 }
 
 export default function ChatConsolePage() {
@@ -85,18 +14,11 @@ export default function ChatConsolePage() {
   const [prompt, setPrompt] = useState("");
   const [output, setOutput] = useState("");
 
-  // File analysis
-  const [selectedFile, setSelectedFile] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // Extracted JSON
-  const [jsonResult, setJsonResult] = useState(null);
-
   // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Persisted request history (from DB)
+  // Persisted request history (from DB) - CHAT ONLY on this page
   const [history, setHistory] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
 
@@ -105,19 +27,17 @@ export default function ChatConsolePage() {
     [history, selectedId]
   );
 
-  const currentJsonRows = useMemo(() => {
-    if (!jsonResult || typeof jsonResult !== "object") return [];
-    return jsonToRows(jsonResult);
-  }, [jsonResult]);
 
-  // Load history from DB on first page load
+  // Load history from DB on first page load (CHAT ONLY)
   useEffect(() => {
     (async () => {
       try {
         const resp = await fetch("/api/history?limit=200");
         const data = await resp.json();
         if (!resp.ok) throw new Error(data?.error || "Failed to load history.");
-        setHistory(Array.isArray(data.items) ? data.items : []);
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        setHistory(items.filter(isChatHistoryItem));
       } catch (e) {
         setError(e?.message || "Failed to load history.");
       }
@@ -131,7 +51,7 @@ export default function ChatConsolePage() {
     setLoading(true);
     setError("");
     setOutput("");
-    setJsonResult(null);
+    //setJsonResult(null);
 
     try {
       const resp = await fetch("/api/chat", {
@@ -143,7 +63,8 @@ export default function ChatConsolePage() {
       const data = await resp.json();
 
       if (!resp.ok) {
-        if (data?.historyItem) {
+        // Only track chat items in this panel
+        if (data?.historyItem && isChatHistoryItem(data.historyItem)) {
           setHistory((prev) => [data.historyItem, ...prev]);
           setSelectedId(data.historyItem.id);
         }
@@ -152,7 +73,8 @@ export default function ChatConsolePage() {
 
       setOutput(data.output || "");
 
-      if (data?.historyItem) {
+      // Only track chat items in this panel
+      if (data?.historyItem && isChatHistoryItem(data.historyItem)) {
         setHistory((prev) => [data.historyItem, ...prev]);
         setSelectedId(data.historyItem.id);
       }
@@ -163,78 +85,15 @@ export default function ChatConsolePage() {
     }
   }
 
-  async function handleAnalyzeFile() {
-    if (!selectedFile || loading) return;
 
-    setLoading(true);
-    setError("");
-    setOutput("");
-    setJsonResult(null);
-
-    try {
-      const fd = new FormData();
-      fd.append("file", selectedFile);
-
-      // No command input from frontend; backend loads instruction JSON internally.
-      const resp = await fetch("/api/analyze-file", {
-        method: "POST",
-        body: fd,
-      });
-
-      const data = await resp.json();
-
-      if (!resp.ok) {
-        if (data?.historyItem) {
-          setHistory((prev) => [data.historyItem, ...prev]);
-          setSelectedId(data.historyItem.id);
-        }
-        throw new Error(data?.error || "File analysis failed.");
-      }
-
-      setJsonResult(data.result ?? null);
-
-      if (data?.historyItem) {
-        setHistory((prev) => [data.historyItem, ...prev]);
-        setSelectedId(data.historyItem.id);
-      }
-    } catch (e) {
-      setError(e?.message || "File analysis failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleRemoveCurrentUploadedFile() {
-    setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
 
   function loadHistoryItem(item) {
     setSelectedId(item.id);
     setError(item.error || "");
 
-    const reqType = item.request_type || "chat";
-
-    if (reqType === "file" || item.result_json) {
-      setPrompt("");
-      setOutput("");
-
-      if (item.result_json) {
-        try {
-          setJsonResult(JSON.parse(item.result_json));
-        } catch {
-          setJsonResult({ _raw: item.result_json });
-        }
-      } else {
-        setJsonResult(null);
-      }
-    } else {
-      setPrompt(item.prompt || "");
-      setOutput(item.response || "");
-      setJsonResult(null);
-    }
+    // This panel shows only chat items; load prompt/response if present.
+    setPrompt(item.prompt || "");
+    setOutput(item.response || "");
   }
 
   async function deleteHistoryItem(id) {
@@ -249,7 +108,7 @@ export default function ChatConsolePage() {
         setSelectedId(null);
         setPrompt("");
         setOutput("");
-        setJsonResult(null);
+        //setJsonResult(null);
         setError("");
       }
     } catch (e) {
@@ -257,40 +116,39 @@ export default function ChatConsolePage() {
     }
   }
 
-  async function clearHistory() {
+  // Clear only the items shown in THIS panel (CHAT-only),
+  // without calling the global DELETE /api/history which would wipe FILE history too.
+  async function clearHistoryPanel() {
+    if (history.length === 0) return;
+
+    setLoading(true);
+    setError("");
     try {
-      const resp = await fetch("/api/history", { method: "DELETE" });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "Clear failed.");
+      for (const item of history) {
+        const resp = await fetch(`/api/history/${item.id}`, { method: "DELETE" });
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data?.error || `Failed clearing id=${item.id}`);
+        }
+      }
 
       setHistory([]);
       setSelectedId(null);
       setPrompt("");
       setOutput("");
-      setJsonResult(null);
+      //setJsonResult(null);
       setError("");
     } catch (e) {
       setError(e?.message || "Clear failed.");
+    } finally {
+      setLoading(false);
     }
   }
 
   function renderHistoryTitle(item) {
-    const reqType = item.request_type || "chat";
-    if (reqType === "file") {
-      const name = item.file_name || "(file)";
-      return `FILE: ${name}`;
-    }
     return item.prompt || "(chat)";
   }
 
-  const downloadBaseName = useMemo(() => {
-    if (selected && (selected.request_type === "file" || selected.result_json)) {
-      const name = selected.file_name || "extracted";
-      return name.replace(/\.[^/.]+$/, "") || "extracted";
-    }
-    if (selectedFile?.name) return selectedFile.name.replace(/\.[^/.]+$/, "");
-    return "extracted";
-  }, [selected, selectedFile]);
 
   return (
     <div style={{ padding: 24, maxWidth: 1250 }}>
@@ -315,55 +173,6 @@ export default function ChatConsolePage() {
             </button>
           </div>
 
-          {/* File analysis */}
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
-            <h3 style={{ marginTop: 0 }}>Analyze a file</h3>
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.txt,image/*"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-              />
-
-              <button onClick={handleAnalyzeFile} disabled={loading || !selectedFile}>
-                {loading ? "Analyzing..." : "Analyze"}
-              </button>
-
-              <button
-                onClick={handleRemoveCurrentUploadedFile}
-                disabled={loading || !selectedFile}
-                title={selectedFile ? "Clear current file selection" : "No file selected"}
-              >
-                Remove Current Uploaded File
-              </button>
-            </div>
-
-            {/* Selected file info */}
-            <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>
-              {selectedFile ? (
-                <div>
-                  <div>
-                    <strong>Selected:</strong> {selectedFile.name}
-                  </div>
-                  <div>
-                    <strong>Size:</strong> {formatBytes(selectedFile.size)}{" "}
-                    <span style={{ opacity: 0.75 }}>({selectedFile.size} bytes)</span>
-                  </div>
-                  <div>
-                    <strong>Type:</strong> {selectedFile.type || "—"}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ opacity: 0.75 }}>No file selected.</div>
-              )}
-            </div>
-
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-              Supported: PDF, DOCX, TXT, JPG/PNG/WEBP/AVIF. The backend chooses the extraction command.
-            </div>
-          </div>
 
           {/* Errors */}
           {error && <p style={{ marginTop: 12 }}>{error}</p>}
@@ -381,101 +190,36 @@ export default function ChatConsolePage() {
             {output || (loading ? "Waiting..." : "—")}
           </pre>
 
-          {/* Extracted JSON: raw + table + download */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginTop: 16,
-            }}
-          >
-            <h3 style={{ margin: 0 }}>Extracted JSON</h3>
+          {/* Selected Request History Preview. 
+          <h4 style={{ marginTop: 12 }}>Selected Request History Preview. </h4>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => {
-                  if (!jsonResult) return;
-                  downloadJsonToDisk(jsonResult, downloadBaseName);
-                }}
-                disabled={!jsonResult}
-                title={jsonResult ? "Download current JSON" : "No JSON to download"}
-              >
-                Download JSON
-              </button>
-
-              <button onClick={() => setJsonResult(null)} disabled={!jsonResult}>
-                Clear JSON View
-              </button>
-            </div>
-          </div>
-
-          {/* Raw JSON */}
           <pre
             style={{
               whiteSpace: "pre-wrap",
               padding: 12,
               border: "1px solid #ddd",
-              minHeight: 140,
-              marginTop: 8,
+              maxHeight: 260,
+              overflow: "auto",
             }}
           >
-            {jsonResult ? JSON.stringify(jsonResult, null, 2) : "—"}
+            {selected ? selected.response || "—" : "—"}
           </pre>
+          */}
 
-          {/* Vertical table view */}
-          <h3 style={{ marginTop: 16 }}>Extracted Data Table</h3>
-          <div style={{ border: "1px solid #ddd", maxHeight: 360, overflow: "auto" }}>
-            {jsonResult ? (
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
-                  <tr>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 10,
-                        borderBottom: "1px solid #eee",
-                        width: "45%",
-                      }}
-                    >
-                      Field
-                    </th>
-                    <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #eee" }}>
-                      Value
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentJsonRows.map((r, idx) => (
-                    <tr key={`${r.path}-${idx}`}>
-                      <td style={{ padding: 10, borderBottom: "1px solid #f0f0f0", verticalAlign: "top" }}>
-                        <code>{r.path}</code>
-                      </td>
-                      <td style={{ padding: 10, borderBottom: "1px solid #f0f0f0", verticalAlign: "top" }}>
-                        {r.value}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ padding: 12, opacity: 0.75 }}>—</div>
-            )}
-          </div>
         </div>
 
-        {/* Right side: history */}
+        {/* Right side: CHAT history */}
         <div style={{ flex: 1, minWidth: 400 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ marginTop: 0 }}>Request History</h3>
-            <button onClick={clearHistory} disabled={history.length === 0}>
-              Clear All
+            <h3 style={{ marginTop: 0 }}>Request History (Chat)</h3>
+            <button onClick={clearHistoryPanel} disabled={loading || history.length === 0}>
+              Clear All (Chat)
             </button>
           </div>
 
           <div style={{ border: "1px solid #ddd" }}>
             {history.length === 0 ? (
-              <div style={{ padding: 12 }}>No requests yet.</div>
+              <div style={{ padding: 12 }}>No chat requests yet.</div>
             ) : (
               history.map((item) => (
                 <div
@@ -513,63 +257,19 @@ export default function ChatConsolePage() {
                         return title.length > 70 ? title.slice(0, 70) + "…" : title;
                       })()}
                     </div>
-
-                    {(item.request_type === "file" || item.file_name) && (
-                      <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                        {item.file_name ? `File: ${item.file_name}` : ""}
-                        {Number.isFinite(item.file_size) ? ` • ${formatBytes(item.file_size)}` : ""}
-                        {item.file_mime ? ` • ${item.file_mime}` : ""}
-                      </div>
-                    )}
                   </button>
 
                   <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 12px 12px" }}>
-                    <button onClick={() => deleteHistoryItem(item.id)}>Delete</button>
+                    <button onClick={() => deleteHistoryItem(item.id)} disabled={loading}>
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))
             )}
           </div>
 
-          {/* Selected preview */}
-          {selected ? (
-            <>
-              <h4 style={{ marginTop: 12 }}>Selected Item Preview</h4>
 
-              {selected.request_type === "file" || selected.result_json ? (
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    padding: 12,
-                    border: "1px solid #ddd",
-                    maxHeight: 260,
-                    overflow: "auto",
-                  }}
-                >
-                  {(() => {
-                    if (!selected.result_json) return "—";
-                    try {
-                      return JSON.stringify(JSON.parse(selected.result_json), null, 2);
-                    } catch {
-                      return selected.result_json;
-                    }
-                  })()}
-                </pre>
-              ) : (
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    padding: 12,
-                    border: "1px solid #ddd",
-                    maxHeight: 260,
-                    overflow: "auto",
-                  }}
-                >
-                  {selected.response || "—"}
-                </pre>
-              )}
-            </>
-          ) : null}
         </div>
       </div>
     </div>

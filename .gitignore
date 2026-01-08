@@ -44,3 +44,6 @@ data/*.db
 uploads/
 backend/uploads/
 backend/data/
+
+# GitHub copilot instructions
+.github/copilot-instructions.md
