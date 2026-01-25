@@ -117,10 +117,19 @@ export default function ChatConsolePage() {
   function loadHistoryItem(item) {
     setSelectedId(item.id);
     setError(item.error || "");
-
-    // This panel shows only chat items; load prompt and map legacy single response to ChatGPT output.
     setPrompt(item.prompt || "");
-    setOutputs({ ...initialOutputs, chatgpt: item.response || "" });
+
+    const newOutputs = { ...initialOutputs };
+    // Use the model key from the history item to populate the correct output.
+    // Fallback to 'chatgpt' for legacy items that might not have a model property.
+    const modelKey = item.model || "chatgpt";
+    if (newOutputs.hasOwnProperty(modelKey)) {
+      newOutputs[modelKey] = item.response || "";
+    } else {
+      // If the model key is unknown, default to showing it in the first available slot as a fallback.
+      newOutputs.chatgpt = item.response || "";
+    }
+    setOutputs(newOutputs);
   }
 
   async function deleteHistoryItem(id) {

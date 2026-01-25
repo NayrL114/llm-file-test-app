@@ -454,7 +454,7 @@ async function callGeminiWithJsonSchema(cmd, parts) {
       const fileBuffer = fs.readFileSync(part.localPath);
       geminiParts.push({
         inline_data: {
-          mime_type: "application/pdf",
+          mime_type: part.mime_type || "application/pdf", // Use dynamic mime_type
           data: fileBuffer.toString("base64"),
         },
       });
@@ -510,7 +510,7 @@ async function callClaudeWithJsonSchema(cmd, parts) {
           type: "document",
           source: {
             type: "base64",
-            media_type: "application/pdf",
+            media_type: p.mime_type || "application/pdf", // Use dynamic mime_type
             data: fileBuffer.toString("base64")
           }
         };
@@ -717,8 +717,8 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         openaiFileId = uploaded.id;
         contentParts.push({ type: "input_file", file_id: openaiFileId });
       } else {
-        // For Gemini and Claude, pass localPath
-        contentParts.push({ type: "input_file", localPath: file.path });
+        // For Gemini and Claude, pass localPath and mime type
+        contentParts.push({ type: "input_file", localPath: file.path, mime_type: mime });
       }
     } else if (isDocx) {
       const result = await mammoth.extractRawText({ path: file.path });
