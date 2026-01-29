@@ -1,23 +1,43 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
-
 const express = require("express");
 const OpenAI = require("openai");
 const fs = require("fs");
-// ...rest unchanged
 
 const Database = require("better-sqlite3");
 const multer = require("multer");
 const sharp = require("sharp");
 const mammoth = require("mammoth");
 
+// Use global fetch when available (Node 18+). If not available, provider calls will error with instructions.
+const fetch = globalThis.fetch;
+if (!fetch) {
+  console.warn(
+    "Global fetch not available. Claude/Gemini provider calls require Node 18+ (or a fetch polyfill). Set up a global fetch or install a compatible fetch polyfill."
+  );
+}
+
+// Provider API keys (set in backend/.env or environment)
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+
+// Optional provider model overrides
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL || "gemini-2.5-flash";
+const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5.2";
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // --------------------
-// OpenAI client
+// OpenAI client for ChatGPT prompts and file analysis
 // --------------------
+//
+// This client is used for both:
+// - plain chat calls (callGPT)
+// - schema-enforced extraction calls (callGPTWithJsonSchema)
+//
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -56,20 +76,33 @@ db.exec(`
     file_size INTEGER,
     file_path TEXT,
     openai_file_id TEXT,
+    model TEXT,
     result_json TEXT
   );
 `);
 
+// Ensure 'model' column exists for older databases (migration)
+try {
+  const cols = db.prepare("PRAGMA table_info(request_history)").all();
+  const hasModelColumn = cols.some((c) => c && c.name === "model");
+  if (!hasModelColumn) {
+    db.exec(`ALTER TABLE request_history ADD COLUMN model TEXT`);
+  }
+} catch (e) {
+  // If migration fails, log but continue — DB will still operate without the column.
+  console.error("Failed to ensure 'model' column exists:", e);
+}
+
 const insertChatStmt = db.prepare(`
-  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms)
-  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms)
+  INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms, model)
+  VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms, @model)
 `);
 
 const insertFileStmt = db.prepare(`
   INSERT INTO request_history (created_at, request_type, prompt, response, status, error, duration_ms,
-                               command_name, file_name, file_mime, file_size, file_path, openai_file_id, result_json)
+                               command_name, file_name, file_mime, file_size, file_path, openai_file_id, model, result_json)
   VALUES (@created_at, @request_type, @prompt, @response, @status, @error, @duration_ms,
-          @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @result_json)
+          @command_name, @file_name, @file_mime, @file_size, @file_path, @openai_file_id, @model, @result_json)
 `);
 
 const listStmt = db.prepare(`
@@ -237,22 +270,390 @@ function isImageExtOrMime(ext, mime) {
 }
 
 // --------------------
-// API: chat (existing)
+// Provider helpers
 // --------------------
+
+/**
+ * Claude (Anthropic) provider caller.
+ * Uses the modern Messages API endpoint.
+ */
+async function callAnthropic(prompt) {
+  if (!ANTHROPIC_API_KEY) throw new Error("Missing ANTHROPIC_API_KEY");
+  if (typeof fetch !== "function") {
+    throw new Error(
+      "Global fetch is not available in this Node runtime; install a fetch polyfill or use Node 18+ to use Anthropic provider."
+    );
+  }
+
+  const url = "https://api.anthropic.com/v1/messages";
+  const model = ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+
+  const body = {
+    model,
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: String(prompt),
+      },
+    ],
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01", // Required header
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Anthropic API error: ${resp.status} ${txt}`);
+  }
+
+  const json = await resp.json();
+
+  // Modern API returns content in this structure
+  if (json.content && Array.isArray(json.content) && json.content.length > 0) {
+    return json.content[0].text || "";
+  }
+
+  // Fallback
+  return JSON.stringify(json);
+}
+
+/**
+ * Gemini (Google) provider caller.
+ * Uses v1beta generateContent endpoint (current for many Gemini SDK-less integrations).
+ */
+async function callGemini(prompt) {
+  if (!GOOGLE_API_KEY) throw new Error("Missing GOOGLE_API_KEY");
+  if (typeof fetch !== "function")
+    throw new Error("Global fetch is not available. Use Node 18+");
+
+  const model = GOOGLE_MODEL || "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
+
+  const body = {
+    contents: [
+      {
+        parts: [{ text: String(prompt) }],
+      },
+    ],
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Google Gemini API error: ${resp.status} ${text}`);
+  }
+
+  const json = JSON.parse(text);
+
+  // Gemini response structure: candidates[0].content.parts[0].text
+  if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+    return json.candidates[0].content.parts[0].text;
+  }
+
+  return JSON.stringify(json);
+}
+
+// --------------------
+// OpenAI (ChatGPT) helpers
+// --------------------
+//
+// We keep OpenAI calls behind a single callGPT(...) function so the rest of the
+// server can route providers consistently (callAnthropic / callGemini / callGPT).
+//
+// Notes:
+// - This project uses the OpenAI "Responses API" (client.responses.create).
+// - For chat: we pass a simple text prompt and return response.output_text.
+// - For file analysis: we pass structured "input" content parts and enforce a JSON schema.
+
+/**
+ * Call OpenAI for a plain-text chat completion (Responses API).
+ * @param {string} prompt
+ * @param {{model?: string}} [opts]
+ * @returns {Promise<string>}
+ */
+async function callGPT(prompt, opts = {}) {
+  const model = opts.model || OPENAI_CHAT_MODEL;
+
+  // Basic hygiene: ensure we always pass a string to the SDK.
+  const input = String(prompt ?? "");
+
+  const response = await client.responses.create({
+    model,
+    input,
+  });
+
+  return response.output_text || "";
+}
+
+/**
+ * Call OpenAI for JSON extraction using a command spec (schema + system prompt).
+ * This wraps the Responses API json_schema format so the route stays clean.
+ *
+ * @param {object} cmd - Loaded command JSON (must include schema_name + schema)
+ * @param {Array} contentParts - Responses API content parts (input_file / input_text / input_image)
+ * @returns {Promise<{jsonText: string, parsed: any, responseId?: string}>}
+ */
+async function callGPTWithJsonSchema(cmd, contentParts) {
+  const response = await client.responses.create({
+    model: cmd.model || "gpt-4o-mini",
+    instructions: cmd.system || "Return only JSON matching the provided schema.",
+    input: [{ role: "user", content: contentParts }],
+    text: {
+      format: {
+        type: "json_schema",
+        name: cmd.schema_name || "extraction_result",
+        strict: true,
+        schema: cmd.schema,
+      },
+    },
+  });
+
+  const jsonText = response.output_text || "{}";
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    // If the model ever returns non-JSON, keep the raw response for debugging.
+    parsed = { _raw: jsonText };
+  }
+
+  return { jsonText, parsed, responseId: response.id };
+}
+
+/**
+ * NEW: Implementation for Google Gemini using response_schema.
+ */
+// --- UPDATED Gemini Helper ---
+/**
+ * Recursively removes 'additionalProperties' from a JSON schema object.
+ * This is a targeted fix because the Gemini API does not support this key.
+ * The function creates a deep clone to avoid mutating the original schema.
+ *
+ * @param {any} obj The schema object or a part of it.
+ * @returns {any} A sanitized deep clone of the object.
+ */
+function sanitizeSchemaForGemini(obj) {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeSchemaForGemini);
+  }
+
+  const newObj = {};
+  for (const key in obj) {
+    if (key !== "additionalProperties") {
+      newObj[key] = sanitizeSchemaForGemini(obj[key]);
+    }
+  }
+  return newObj;
+}
+
+async function callGeminiWithJsonSchema(cmd, parts) {
+  if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured.");
+
+  const geminiParts = [];
+  for (const part of parts) {
+    if (part.type === "input_text") {
+      geminiParts.push({ text: part.text });
+    } else if (part.type === "input_image") {
+      const [header, b64] = part.image_url.split(",");
+      const mime = header.split(";")[0].split(":")[1];
+      geminiParts.push({ inline_data: { mime_type: mime, data: b64 } });
+    } else if (part.type === "input_file" && part.localPath) {
+      // FIX: Read the actual file bytes from the upload directory
+      const fileBuffer = fs.readFileSync(part.localPath);
+      geminiParts.push({
+        inline_data: {
+          mime_type: part.mime_type || "application/pdf", // Use dynamic mime_type
+          data: fileBuffer.toString("base64"),
+        },
+      });
+    }
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+  
+  // Sanitize the schema to remove unsupported properties for the Gemini API.
+  const sanitizedSchema = sanitizeSchemaForGemini(cmd.schema);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: cmd.system }] },
+      contents: [{ role: "user", parts: geminiParts }],
+      generationConfig: {
+        response_mime_type: "application/json",
+        response_schema: sanitizedSchema, // Use the sanitized schema
+      },
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Gemini API Error: ${data.error.message}`);
+  
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  return { output: JSON.parse(text) };
+}
+
+/**
+ * NEW: Implementation for Anthropic (Claude) using Structured Outputs.
+ * This uses the 'output_format' beta feature.
+ */
+async function callClaudeWithJsonSchema(cmd, parts) {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured.");
+
+  const messages = [{
+    role: "user",
+    content: parts.map(p => {
+      if (p.type === "input_text") {
+        return { type: "text", text: p.text };
+      }
+      if (p.type === "input_image") {
+        const [header, b64] = p.image_url.split(",");
+        const mime = header.split(";")[0].split(":")[1];
+        return { 
+          type: "image", 
+          source: { type: "base64", media_type: mime, data: b64 } 
+        };
+      }
+      if (p.type === "input_file" && p.localPath) {
+        const fileBuffer = fs.readFileSync(p.localPath);
+        return {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: p.mime_type || "application/pdf", // Use dynamic mime_type
+            data: fileBuffer.toString("base64")
+          }
+        };
+      }
+      return null;
+    }).filter(Boolean)
+  }];
+
+  const url = "https://api.anthropic.com/v1/messages";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      system: cmd.system,
+      messages: messages,
+      max_tokens: 4096,
+      tools: [{
+        name: "extract_resume",
+        description: "Extract structured resume information from the document",
+        input_schema: cmd.schema
+      }],
+      tool_choice: { type: "tool", name: "extract_resume" }
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Claude API Error: ${data.error.message}`);
+  
+  // Find the tool use in the response
+  const toolUse = data.content.find(block => block.type === "tool_use");
+  if (!toolUse) {
+    throw new Error("Claude did not return a tool use response");
+  }
+  
+  return { output: toolUse.input };
+}
+
+// --------------------
+// API: chat (supports model selection)
+// --------------------
+//
+// Frontend should send JSON:
+// - prompt: string
+// - model: 'chatgpt' | 'gemini' | 'claude'   (optional, defaults to 'chatgpt')
+//
+/**
+ * UPDATED: The /api/analyze-file route now switches based on the provider.
+ */
+// --------------------
+// API: chat (supports model selection)
+// --------------------
+//
+// Frontend should send JSON:
+// - prompt: string
+// - model: 'chatgpt' | 'gemini' | 'claude'   (optional, defaults to 'chatgpt')
+//
 app.post("/api/chat", async (req, res) => {
   try {
     const prompt = String(req.body?.prompt ?? "").trim();
     if (!prompt) return res.status(400).json({ error: "Missing prompt." });
 
+    // model key expected from frontend: 'chatgpt', 'gemini', or 'claude'. Default to chatgpt for legacy calls.
+    const modelKey = String(req.body?.model || "chatgpt");
+
     const createdAt = new Date().toISOString();
     const startedAt = Date.now();
 
-    const response = await client.responses.create({
-      model: "gpt-5.2",
-      input: prompt,
-    });
+    // Route to provider-specific callers
+    let outputText = "";
+    try {
+      if (modelKey === "claude") {
+        outputText = await callAnthropic(prompt);
+      } else if (modelKey === "gemini") {
+        outputText = await callGemini(prompt);
+      } else {
+        // Default / ChatGPT via OpenAI
+        outputText = await callGPT(prompt);
+      }
+    } catch (provErr) {
+      const durationMs = Date.now() - startedAt;
 
-    const outputText = response.output_text || "";
+      // Persist error run
+      const infoErr = insertChatStmt.run({
+        created_at: createdAt,
+        request_type: "chat",
+        prompt,
+        response: null,
+        status: "error",
+        error: provErr?.message || String(provErr),
+        duration_ms: durationMs,
+        model: modelKey,
+      });
+
+      console.error("Provider call failed:", provErr);
+      return res.status(500).json({
+        error: provErr?.message || "Provider call failed.",
+        historyItem: {
+          id: infoErr.lastInsertRowid,
+          created_at: createdAt,
+          request_type: "chat",
+          prompt,
+          status: "error",
+          error: provErr?.message || String(provErr),
+          duration_ms: durationMs,
+          model: modelKey,
+        },
+      });
+    }
+
     const durationMs = Date.now() - startedAt;
 
     const info = insertChatStmt.run({
@@ -263,6 +664,7 @@ app.post("/api/chat", async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
+      model: modelKey,
     });
 
     res.json({
@@ -276,22 +678,27 @@ app.post("/api/chat", async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
+        model: modelKey,
       },
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server error calling OpenAI." });
+    res.status(500).json({ error: "Server error calling provider." });
   }
 });
 
+
 // --------------------
-// API: analyze file (NEW)
+// API: analyze file
 // --------------------
 //
 // Frontend should send multipart/form-data:
 // - field name: "file"
 // - optional field: "command" (e.g. extract-v1.json)
 //
+// --------------------
+// API: analyze file
+// --------------------
 app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: "Missing file." });
@@ -301,25 +708,21 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 
   let cmd;
   try {
-    //const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
-    const commandFile = req.body?.command ? String(req.body.command) : "extract-v1.json";
-    cmd = loadCommand(commandFile);
+    const commandFile = req.body?.command || "resume-extract-v1.json";
+    const commandFileSafe = path.basename(commandFile);
+    cmd = loadCommand(commandFileSafe);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 
-  // normalize original filename (fix mojibake)
+  const provider = req.body?.provider || "openai";
   const originalName = normalizeFilename(String(file.originalname || ""));
-
-  //const ext = path.extname(file.originalname || "").toLowerCase();
   const ext = path.extname(originalName || "").toLowerCase();
   const mime = file.mimetype || "";
 
-  // Allow only your stated types
+  // Validate file type
   const isPdf = ext === ".pdf" || mime === "application/pdf";
-  const isDocx =
-    ext === ".docx" ||
-    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const isDocx = ext === ".docx" || mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const isTxt = ext === ".txt" || mime.startsWith("text/");
   const isImg = isImageExtOrMime(ext, mime);
 
@@ -329,22 +732,24 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
     });
   }
 
-  // Build content parts for OpenAI Responses API (input_file / input_text / input_image)
-  const contentParts = [];
+  let contentParts = [{ type: "input_text", text: cmd.user_prompt }];
   let openaiFileId = null;
 
   try {
+    // Handle different file types
     if (isPdf) {
-      // Upload file to OpenAI
-      const uploaded = await client.files.create({
-        file: fs.createReadStream(file.path),
-        purpose: "assistants",
-      });
-      openaiFileId = uploaded.id;
-
-      contentParts.push({ type: "input_file", file_id: openaiFileId });
+      if (provider === "openai") {
+        const uploaded = await client.files.create({
+          file: fs.createReadStream(file.path),
+          purpose: "assistants",
+        });
+        openaiFileId = uploaded.id;
+        contentParts.push({ type: "input_file", file_id: openaiFileId });
+      } else {
+        // For Gemini and Claude, pass localPath and mime type
+        contentParts.push({ type: "input_file", localPath: file.path, mime_type: mime });
+      }
     } else if (isDocx) {
-      // Extract DOCX text server-side
       const result = await mammoth.extractRawText({ path: file.path });
       const text = (result.value || "").trim();
       contentParts.push({
@@ -352,11 +757,9 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         text: text || "(DOCX contained no extractable text.)",
       });
     } else if (isTxt) {
-      // Read text file
       const text = fs.readFileSync(file.path, "utf8");
       contentParts.push({ type: "input_text", text });
     } else if (isImg) {
-      // Image: normalize WEBP/AVIF to PNG for better downstream handling
       let buf = fs.readFileSync(file.path);
       let outMime = mime;
 
@@ -367,43 +770,26 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         outMime = "image/jpeg";
       }
 
-      // Send image as base64 data URL
       contentParts.push({
         type: "input_image",
         image_url: asDataUrl(buf, outMime || "image/png"),
       });
     }
 
-    // Append command prompt from backend
-    contentParts.push({
-      type: "input_text",
-      text: cmd.user_prompt || "Extract the required information from the provided input.",
-    });
-
-    const response = await client.responses.create({
-      model: cmd.model || "gpt-4o-mini",
-      instructions: cmd.system || "Return only JSON matching the provided schema.",
-      input: [{ role: "user", content: contentParts }],
-      text: {
-        format: {
-          type: "json_schema",
-          name: cmd.schema_name || "extraction_result",
-          strict: true,
-          schema: cmd.schema,
-        },
-      },
-    });
+    // Call the appropriate provider
+    let result;
+    if (provider === "gemini") {
+      result = await callGeminiWithJsonSchema(cmd, contentParts);
+    } else if (provider === "claude") {
+      result = await callClaudeWithJsonSchema(cmd, contentParts);
+    } else {
+      const response = await callGPTWithJsonSchema(cmd, contentParts);
+      result = { output: response.parsed };
+    }
 
     const durationMs = Date.now() - startedAt;
 
-    const jsonText = response.output_text || "{}";
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch {
-      parsed = { _raw: jsonText };
-    }
-
+    // Save to database
     const info = insertFileStmt.run({
       created_at: createdAt,
       request_type: "file",
@@ -412,18 +798,18 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
-      //command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
-      command_name: cmd.name || "extract-v1.json",
+      command_name: cmd.name || "resume-extract-v1",
       file_name: originalName,
       file_mime: mime,
       file_size: file.size,
       file_path: file.path,
       openai_file_id: openaiFileId,
-      result_json: JSON.stringify(parsed),
+      model: provider,
+      result_json: JSON.stringify(result.output),
     });
 
     res.json({
-      result: parsed,
+      result: result.output,
       historyItem: {
         id: info.lastInsertRowid,
         created_at: createdAt,
@@ -432,20 +818,20 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
-        command_name: cmd.name || path.basename(req.body?.command || "extract-v1.json"),
+        command_name: cmd.name || "resume-extract-v1",
+        model: provider,
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         openai_file_id: openaiFileId,
-        result_json: JSON.stringify(parsed),
+        result_json: JSON.stringify(result.output),
       },
     });
-
   } catch (err) {
-    console.error(err);
+    console.error("Analysis Error:", err);
     const durationMs = Date.now() - startedAt;
 
-    // Store error run too (so it appears in history)
+    // Store error in history
     try {
       const info = insertFileStmt.run({
         created_at: createdAt,
@@ -455,12 +841,13 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "error",
         error: err?.message || "Analyze failed.",
         duration_ms: durationMs,
-        command_name: cmd?.name || path.basename(req.body?.command || "extract-v1.json"),
+        command_name: cmd?.name || "resume-extract-v1",
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
         file_path: file.path,
         openai_file_id: openaiFileId,
+        model: provider,
         result_json: null,
       });
 
@@ -474,7 +861,8 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           status: "error",
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
-          command_name: cmd?.name || path.basename(req.body?.command || "extract-v1.json"),
+          command_name: cmd?.name || "resume-extract-v1",
+          model: provider,
           file_name: originalName,
           file_mime: mime,
           file_size: file.size,
@@ -482,10 +870,14 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           result_json: null,
         },
       });
-
     } catch (dbErr) {
       console.error("Failed to persist error history:", dbErr);
       return res.status(500).json({ error: err?.message || "Analyze failed." });
+    }
+  } finally {
+    // Clean up uploaded file
+    if (file && fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path);
     }
   }
 });
@@ -554,5 +946,60 @@ app.delete("/api/history", (req, res) => {
   deleteAllStmt.run();
   res.json({ ok: true });
 });
+
+// Validate runtime configuration and warn about missing keys or inconsistent settings
+function validateConfig() {
+  const warnings = [];
+
+  if (!process.env.OPENAI_API_KEY) {
+    warnings.push("OPENAI_API_KEY is not set. OpenAI-based ChatGPT calls will fail.");
+  }
+
+  if (process.env.OPENAI_CHAT_MODEL && !process.env.OPENAI_API_KEY) {
+    warnings.push(
+      "OPENAI_CHAT_MODEL is set but OPENAI_API_KEY is not set — ChatGPT provider will not work without the key."
+    );
+  }
+
+  if (ANTHROPIC_API_KEY && typeof fetch !== "function") {
+    warnings.push(
+      "ANTHROPIC_API_KEY is set but global fetch is not available in this Node runtime. Install a fetch polyfill or use Node 18+ to enable Anthropic (Claude) provider."
+    );
+  }
+
+  if (GOOGLE_API_KEY && typeof fetch !== "function") {
+    warnings.push(
+      "GOOGLE_API_KEY is set but global fetch is not available in this Node runtime. Install a fetch polyfill or use Node 18+ to enable Google Gemini provider."
+    );
+  }
+
+  if (ANTHROPIC_MODEL && !ANTHROPIC_API_KEY) {
+    warnings.push(
+      "ANTHROPIC_MODEL is set but ANTHROPIC_API_KEY is not set — Claude provider will not work without the key."
+    );
+  }
+
+  if (GOOGLE_MODEL && !GOOGLE_API_KEY) {
+    warnings.push(
+      "GOOGLE_MODEL is set but GOOGLE_API_KEY is not set — Gemini provider will not work without the key."
+    );
+  }
+
+  if (!ANTHROPIC_API_KEY && !GOOGLE_API_KEY && !process.env.OPENAI_API_KEY) {
+    warnings.push(
+      "No provider API keys are configured. The server will not be able to make external model calls."
+    );
+  }
+
+  if (warnings.length > 0) {
+    console.warn("\n=== Configuration warnings ===");
+    for (const w of warnings) console.warn("- " + w);
+    console.warn("=== End configuration warnings ===\n");
+  } else {
+    console.log("Configuration OK: provider keys and runtime sanity checks passed.");
+  }
+}
+
+validateConfig();
 
 app.listen(3001, () => console.log("API server running on http://localhost:3001"));
