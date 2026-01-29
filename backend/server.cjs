@@ -438,6 +438,32 @@ async function callGPTWithJsonSchema(cmd, contentParts) {
  * NEW: Implementation for Google Gemini using response_schema.
  */
 // --- UPDATED Gemini Helper ---
+/**
+ * Recursively removes 'additionalProperties' from a JSON schema object.
+ * This is a targeted fix because the Gemini API does not support this key.
+ * The function creates a deep clone to avoid mutating the original schema.
+ *
+ * @param {any} obj The schema object or a part of it.
+ * @returns {any} A sanitized deep clone of the object.
+ */
+function sanitizeSchemaForGemini(obj) {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeSchemaForGemini);
+  }
+
+  const newObj = {};
+  for (const key in obj) {
+    if (key !== "additionalProperties") {
+      newObj[key] = sanitizeSchemaForGemini(obj[key]);
+    }
+  }
+  return newObj;
+}
+
 async function callGeminiWithJsonSchema(cmd, parts) {
   if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured.");
 
@@ -462,6 +488,9 @@ async function callGeminiWithJsonSchema(cmd, parts) {
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+  
+  // Sanitize the schema to remove unsupported properties for the Gemini API.
+  const sanitizedSchema = sanitizeSchemaForGemini(cmd.schema);
 
   const response = await fetch(url, {
     method: "POST",
@@ -471,7 +500,7 @@ async function callGeminiWithJsonSchema(cmd, parts) {
       contents: [{ role: "user", parts: geminiParts }],
       generationConfig: {
         response_mime_type: "application/json",
-        response_schema: cmd.schema, // Uses the schema from resume-extract-v1.json
+        response_schema: sanitizedSchema, // Use the sanitized schema
       },
     }),
   });
