@@ -244,7 +244,8 @@ function loadCommand(commandName) {
   }
 
   const raw = fs.readFileSync(cmdPath, "utf8");
-  const cmd = JSON.parse(raw);
+  const sanitized = raw.replace(/^\uFEFF/, "");
+  const cmd = JSON.parse(sanitized);
 
   if (!cmd.schema || !cmd.schema_name) {
     throw new Error(
@@ -708,7 +709,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 
   let cmd;
   try {
-    const commandFile = req.body?.command || "resume-extract-v1.json";
+    const commandFile = req.body?.command || "resume-extract-v2.json";
     const commandFileSafe = path.basename(commandFile);
     cmd = loadCommand(commandFileSafe);
   } catch (err) {
@@ -798,7 +799,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
-      command_name: cmd.name || "resume-extract-v1",
+      command_name: cmd.name || "resume-extract-v2",
       file_name: originalName,
       file_mime: mime,
       file_size: file.size,
@@ -818,7 +819,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
-        command_name: cmd.name || "resume-extract-v1",
+        command_name: cmd.name || "resume-extract-v2",
         model: provider,
         file_name: originalName,
         file_mime: mime,
@@ -841,7 +842,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "error",
         error: err?.message || "Analyze failed.",
         duration_ms: durationMs,
-        command_name: cmd?.name || "resume-extract-v1",
+        command_name: cmd?.name || "resume-extract-v2",
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
@@ -861,7 +862,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           status: "error",
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
-          command_name: cmd?.name || "resume-extract-v1",
+          command_name: cmd?.name || "resume-extract-v2",
           model: provider,
           file_name: originalName,
           file_mime: mime,
