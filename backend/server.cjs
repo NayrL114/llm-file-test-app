@@ -10,6 +10,9 @@ const multer = require("multer");
 const sharp = require("sharp");
 const mammoth = require("mammoth");
 
+const envPath = path.join(__dirname, ".env");
+const envExamplePath = path.join(__dirname, ".env.example");
+
 // Use global fetch when available (Node 18+). If not available, provider calls will error with instructions.
 const fetch = globalThis.fetch;
 if (!fetch) {
@@ -29,6 +32,31 @@ const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5.2";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
+
+function ensureEnvFile() {
+  if (fs.existsSync(envPath)) return;
+  if (!fs.existsSync(envExamplePath)) {
+    throw new Error("backend/.env.example is missing.");
+  }
+  fs.copyFileSync(envExamplePath, envPath);
+}
+
+function updateEnvFile(updates) {
+  ensureEnvFile();
+  const raw = fs.readFileSync(envPath, "utf8");
+  const keys = Object.keys(updates);
+  const keyMatchers = keys.map((k) => new RegExp(`^\\s*(?:export\\s+)?${k}=`));
+  const lines = raw.split(/\r?\n/);
+  const filtered = lines.filter((line) => !keyMatchers.some((rx) => rx.test(line)));
+
+  for (const key of keys) {
+    filtered.push(`${key}=${updates[key]}`);
+  }
+
+  let output = filtered.join("\n");
+  if (!output.endsWith("\n")) output += "\n";
+  fs.writeFileSync(envPath, output, "utf8");
+}
 
 // --------------------
 // OpenAI client for ChatGPT prompts and file analysis
@@ -685,6 +713,32 @@ app.post("/api/chat", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error calling provider." });
+  }
+});
+
+// --------------------
+// API: settings (API key updates)
+// --------------------
+app.post("/api/settings/keys", (req, res) => {
+  try {
+    const openai = String(req.body?.openaiKey ?? "").trim();
+    const anthropic = String(req.body?.anthropicKey ?? "").trim();
+    const google = String(req.body?.googleKey ?? "").trim();
+
+    const updates = {};
+    if (openai) updates.OPENAI_API_KEY = openai;
+    if (anthropic) updates.ANTHROPIC_API_KEY = anthropic;
+    if (google) updates.GOOGLE_API_KEY = google;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No API keys provided." });
+    }
+
+    updateEnvFile(updates);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to update API keys:", err);
+    res.status(500).json({ error: err?.message || "Failed to save API keys." });
   }
 });
 
