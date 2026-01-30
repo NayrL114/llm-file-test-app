@@ -1,10 +1,10 @@
 ﻿# GPT Agent Repository Review
 
-**Review Timestamp:** 2026-01-30 14:22:00
+**Review Timestamp:** 2026-01-30 16:10:00
 
 ## High-Level Summary
 
-This repo is a React + Vite frontend with a Node/Express backend in a simple monorepo (npm workspaces). The app exposes two primary user flows: a multi-model Chat Console and a Resume Extractor that performs schema-based extraction from uploaded files. The Resume Extractor was recently expanded to a v2 schema (new Work Experience, Education, and License/Certificate sections with validation) and now defaults to the v2 extraction command. The backend proxies requests to OpenAI, Gemini, and Claude, and persists all requests in a SQLite history database.
+This repo is a React + Vite frontend with a Node/Express backend in a simple monorepo (npm workspaces). The app now exposes three primary user flows: a multi-model Chat Console, a Resume Extractor that performs schema-based extraction from uploaded files, and a Settings page for provider API key management and night-mode theming. The Resume Extractor uses the v2 schema (Work Experience, Education, and License/Certificate sections with validation) and defaults to the v2 extraction command. The backend proxies requests to OpenAI, Gemini, and Claude, persists all requests in a SQLite history database, and can update backend `.env` provider keys via an API endpoint.
 
 ## Backend (`backend/server.cjs`)
 
@@ -16,6 +16,7 @@ This repo is a React + Vite frontend with a Node/Express backend in a simple mon
 - **Command parsing:** Command JSON is sanitized for UTF-8 BOMs before parsing.
 - **API routes:**
   - `POST /api/chat` (model selection)
+  - `POST /api/settings/keys` (update provider API keys in `backend/.env`)
   - `POST /api/analyze-file` (schema-based file extraction)
   - `GET /api/history`
   - `DELETE /api/history/:id`
@@ -24,9 +25,11 @@ This repo is a React + Vite frontend with a Node/Express backend in a simple mon
 ## Frontend (`frontend/`)
 
 - **Framework:** React SPA built with Vite.
-- **Routing:** `react-router-dom` with two pages: Chat Console and Resume Extract.
+- **Routing:** `react-router-dom` with three pages: Chat Console, Resume Extract, and Settings.
 - **Chat Console:** Sends prompts to selected models, shows per-model output, and lists chat history.
 - **Resume Extract:** Uploads files for extraction, displays editable structured output, and lists file history. The form now includes Work Experience, Education, and License/Certificate sections, with required-field validation, date pickers, and conditional end-date/checkbox behavior.
+- **Settings:** Allows users to save provider API keys (OpenAI, Claude, Gemini) to `backend/.env` and toggle night mode.
+- **Theming:** CSS variable-based light/dark palettes are applied via a `data-theme` attribute, with night-mode state persisted in `localStorage`.
 - **Dev proxy:** `/api` proxied to `http://localhost:3001` via `frontend/vite.config.js`.
 
 ## Overall Architecture

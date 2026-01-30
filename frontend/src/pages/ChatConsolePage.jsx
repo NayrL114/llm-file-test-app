@@ -242,7 +242,7 @@ export default function ChatConsolePage() {
                 style={{
                   whiteSpace: "pre-wrap",
                   padding: 12,
-                  border: "1px solid #ddd",
+                  border: "1px solid var(--panel-border)",
                   minHeight: 80,
                 }}
               >
@@ -278,7 +278,7 @@ export default function ChatConsolePage() {
             </button>
           </div>
 
-          <div style={{ border: "1px solid #ddd" }}>
+          <div style={{ border: "1px solid var(--panel-border)" }}>
             {history.length === 0 ? (
               <div style={{ padding: 12 }}>No chat requests yet.</div>
             ) : (
@@ -286,8 +286,9 @@ export default function ChatConsolePage() {
                 <div
                   key={item.id}
                   style={{
-                    borderBottom: "1px solid #eee",
-                    background: Number(item.id) === Number(selectedId) ? "#f6f6f6" : "white",
+                    borderBottom: "1px solid var(--panel-border-subtle)",
+                    background:
+                      Number(item.id) === Number(selectedId) ? "var(--panel-bg-alt)" : "var(--panel-bg)",
                   }}
                 >
                   <button
@@ -299,6 +300,7 @@ export default function ChatConsolePage() {
                       padding: 12,
                       border: "none",
                       background: "transparent",
+                      color: "var(--text)",
                       cursor: "pointer",
                     }}
                   >

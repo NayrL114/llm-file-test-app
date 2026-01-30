@@ -896,7 +896,15 @@ export default function ResumeExtractPage() {
         {/* Left Panel: File Import & Main Form */}
         <div style={{ flex: 2, minWidth: 560 }}>
           
-          <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <section
+            style={{
+              border: "1px solid var(--panel-border)",
+              borderRadius: 8,
+              padding: 16,
+              marginBottom: 16,
+              background: "var(--panel-bg)",
+            }}
+          >
             <h2 style={{ marginTop: 0 }}>Import from Resume (Optional)</h2>
 
             {/* Model Selection Radio Buttons */}
@@ -995,7 +1003,15 @@ export default function ResumeExtractPage() {
           </section>
 
           {/* Application Form Sections */}
-          <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <section
+            style={{
+              border: "1px solid var(--panel-border)",
+              borderRadius: 8,
+              padding: 16,
+              marginBottom: 16,
+              background: "var(--panel-bg)",
+            }}
+          >
             <h2 style={{ marginTop: 0 }}>Application Form</h2>
 
             <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -1019,7 +1035,15 @@ export default function ResumeExtractPage() {
             )}
 
             {/* Personal Profile Section */}
-            <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                border: "1px solid var(--panel-border-subtle)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: "var(--panel-bg)",
+              }}
+            >
               <h3 style={{ marginTop: 0 }}>Personal Profile</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
@@ -1101,7 +1125,15 @@ export default function ResumeExtractPage() {
             </div>
 
             {/* Education History Section */}
-            <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                border: "1px solid var(--panel-border-subtle)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: "var(--panel-bg)",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={{ margin: 0 }}>Education History</h3>
                 <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.education_history = [...(r.education_history || []), emptyEducation()]; return r; })}>Add Education</button>
@@ -1109,7 +1141,10 @@ export default function ResumeExtractPage() {
               {currentDraftResume.education_history.map((ed, idx) => {
                 const isCurrent = String(ed.is_current || "").toLowerCase() === "true";
                 return (
-                  <div key={idx} style={{ borderTop: "1px solid #eee", paddingTop: 12, marginTop: 12 }}>
+                  <div
+                    key={idx}
+                    style={{ borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 12, marginTop: 12 }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <strong>Entry #{idx + 1}</strong>
                       <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.education_history = r.education_history.filter((_, i) => i !== idx); return r; })}>Remove</button>
@@ -1170,7 +1205,15 @@ export default function ResumeExtractPage() {
               })}
             </div>
             {/* Work Experience Section */}
-            <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                border: "1px solid var(--panel-border-subtle)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: "var(--panel-bg)",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={{ margin: 0 }}>Work Experience</h3>
                 <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.work_experience = [...(r.work_experience || []), emptyWork()]; return r; })}>Add Work</button>
@@ -1178,7 +1221,10 @@ export default function ResumeExtractPage() {
               {currentDraftResume.work_experience.map((wk, idx) => {
                 const isCurrent = String(wk.is_current || "").toLowerCase() === "true";
                 return (
-                  <div key={idx} style={{ borderTop: "1px solid #eee", paddingTop: 12, marginTop: 12 }}>
+                  <div
+                    key={idx}
+                    style={{ borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 12, marginTop: 12 }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <strong>Entry #{idx + 1}</strong>
                       <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.work_experience = r.work_experience.filter((_, i) => i !== idx); return r; })}>Remove</button>
@@ -1242,7 +1288,15 @@ export default function ResumeExtractPage() {
               })}
             </div>
             {/* License / Certificate Section */}
-            <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                border: "1px solid var(--panel-border-subtle)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: "var(--panel-bg)",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={{ margin: 0 }}>License / Certificate</h3>
                 <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.licenses_certificates = [...(r.licenses_certificates || []), emptyLicense()]; return r; })}>Add License/Certificate</button>
@@ -1250,7 +1304,10 @@ export default function ResumeExtractPage() {
               {currentDraftResume.licenses_certificates.map((lc, idx) => {
                 const isPermanent = String(lc.permanent_valid || "").toLowerCase() === "true";
                 return (
-                  <div key={idx} style={{ borderTop: "1px solid #eee", paddingTop: 12, marginTop: 12 }}>
+                  <div
+                    key={idx}
+                    style={{ borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 12, marginTop: 12 }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <strong>Entry #{idx + 1}</strong>
                       <button type="button" onClick={() => setResumeAtIndex(selectedResumeIndex, (r) => { r.licenses_certificates = r.licenses_certificates.filter((_, i) => i !== idx); return r; })}>Remove</button>
@@ -1301,15 +1358,38 @@ export default function ResumeExtractPage() {
           </section>
 
           {/* JSON Previews */}
-          <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16 }}>
+          <section
+            style={{
+              border: "1px solid var(--panel-border)",
+              borderRadius: 8,
+              padding: 16,
+              background: "var(--panel-bg)",
+            }}
+          >
             <h2 style={{ marginTop: 0 }}>JSON Preview</h2>
-            <pre style={{ margin: 0, overflow: "auto", maxHeight: 400, background: "#f7f7f7", padding: 12 }}>
+            <pre
+              style={{
+                margin: 0,
+                overflow: "auto",
+                maxHeight: 400,
+                background: "var(--pre-bg)",
+                padding: 12,
+              }}
+            >
               {JSON.stringify({ resumes: draftResumes }, null, 2)}
             </pre>
             {extractedResult && (
               <div style={{ marginTop: 20 }}>
                 <h3>Last Model Output (Raw)</h3>
-                <pre style={{ margin: 0, overflow: "auto", maxHeight: 400, background: "#f1f1f1", padding: 12 }}>
+                <pre
+                  style={{
+                    margin: 0,
+                    overflow: "auto",
+                    maxHeight: 400,
+                    background: "var(--pre-bg-alt)",
+                    padding: 12,
+                  }}
+                >
                   {JSON.stringify(extractedResult, null, 2)}
                 </pre>
               </div>
@@ -1326,7 +1406,7 @@ export default function ResumeExtractPage() {
             </button>
           </div>
 
-          <div style={{ border: "1px solid #ddd" }}>
+          <div style={{ border: "1px solid var(--panel-border)" }}>
             {history.length === 0 ? (
               <div style={{ padding: 12 }}>No history found.</div>
             ) : (
@@ -1334,8 +1414,9 @@ export default function ResumeExtractPage() {
                 <div
                   key={item.id}
                   style={{
-                    borderBottom: "1px solid #eee",
-                    background: Number(item.id) === Number(selectedHistoryId) ? "#f6f6f6" : "white",
+                    borderBottom: "1px solid var(--panel-border-subtle)",
+                    background:
+                      Number(item.id) === Number(selectedHistoryId) ? "var(--panel-bg-alt)" : "var(--panel-bg)",
                   }}
                 >
                   <button
@@ -1347,6 +1428,7 @@ export default function ResumeExtractPage() {
                       padding: 12,
                       border: "none",
                       background: "transparent",
+                      color: "var(--text)",
                       cursor: "pointer",
                     }}
                   >
@@ -1366,7 +1448,16 @@ export default function ResumeExtractPage() {
           {selectedHistoryItem && (
             <div style={{ marginTop: 15 }}>
               <h4>History Item Detail</h4>
-              <pre style={{ whiteSpace: "pre-wrap", padding: 10, border: "1px solid #ddd", maxHeight: 300, overflow: "auto" }}>
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  padding: 10,
+                  border: "1px solid var(--panel-border)",
+                  maxHeight: 300,
+                  overflow: "auto",
+                  background: "var(--pre-bg)",
+                }}
+              >
                 {JSON.stringify(JSON.parse(selectedHistoryItem.result_json || "{}"), null, 2)}
               </pre>
             </div>
