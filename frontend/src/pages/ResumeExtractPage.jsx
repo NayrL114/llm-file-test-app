@@ -38,6 +38,33 @@ function formatBytes(bytes) {
   return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
 }
 
+function getBirthYearFromDob(dateOfBirth) {
+  const match = String(dateOfBirth || "").match(/^(\d{4})/);
+  return match ? match[1] : "";
+}
+
+function sanitizeBirthYearInput(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 4);
+}
+
+function getLatestJobTitle(workItems) {
+  const items = Array.isArray(workItems) ? workItems : [];
+  const currentRole = items.find((wk) => String(wk?.is_current || "").toLowerCase() === "true");
+  if (currentRole?.job_title) return currentRole.job_title;
+
+  let best = "";
+  let bestDate = "";
+  items.forEach((wk) => {
+    const endDate = String(wk?.end_date || "");
+    if (endDate && endDate > bestDate && wk?.job_title) {
+      bestDate = endDate;
+      best = wk.job_title;
+    }
+  });
+
+  return best;
+}
+
 const INDUSTRIES = [
   'Accounting',
   'Agriculture & Farming',
@@ -390,6 +417,219 @@ const COUNTRIES = [
   'Zambia',
   'Zimbabwe'
 ];
+const EDUCATION_LEVELS = [
+  "High School",
+  "Associate's Degree",
+  "Bachelor's Degree",
+  "Master's Degree",
+  "Doctorate",
+  "Professional Degree",
+  "Others",
+];
+const PHONE_COUNTRIES = [
+  { name: 'Afghanistan', code: 'AF', dial: '+93', format: '## ### ####', flag: '????' },
+  { name: 'Albania', code: 'AL', dial: '+355', format: '## ### ####', flag: '????' },
+  { name: 'Algeria', code: 'DZ', dial: '+213', format: '### ## ## ##', flag: '????' },
+  { name: 'Andorra', code: 'AD', dial: '+376', format: '### ###', flag: '????' },
+  { name: 'Angola', code: 'AO', dial: '+244', format: '### ### ###', flag: '????' },
+  { name: 'Antigua & Barbuda', code: 'AG', dial: '+1-268', format: '(###) ###-####', flag: '????' },
+  { name: 'Argentina', code: 'AR', dial: '+54', format: '## ####-####', flag: '????' },
+  { name: 'Armenia', code: 'AM', dial: '+374', format: '## ######', flag: '????' },
+  { name: 'Aruba', code: 'AW', dial: '+297', format: '### ####', flag: '????' },
+  { name: 'Australia', code: 'AU', dial: '+61', format: '### ### ###', flag: '????' },
+  { name: 'Austria', code: 'AT', dial: '+43', format: '### ######', flag: '????' },
+  { name: 'Azerbaijan', code: 'AZ', dial: '+994', format: '## ### ## ##', flag: '????' },
+  { name: 'Bahamas', code: 'BS', dial: '+1-242', format: '(###) ###-####', flag: '????' },
+  { name: 'Bahrain', code: 'BH', dial: '+973', format: '#### ####', flag: '????' },
+  { name: 'Bangladesh', code: 'BD', dial: '+880', format: '####-######', flag: '????' },
+  { name: 'Barbados', code: 'BB', dial: '+1-246', format: '(###) ###-####', flag: '????' },
+  { name: 'Belarus', code: 'BY', dial: '+375', format: '## ###-##-##', flag: '????' },
+  { name: 'Belgium', code: 'BE', dial: '+32', format: '### ## ## ##', flag: '????' },
+  { name: 'Belize', code: 'BZ', dial: '+501', format: '###-####', flag: '????' },
+  { name: 'Benin', code: 'BJ', dial: '+229', format: '## ## ####', flag: '????' },
+  { name: 'Bhutan', code: 'BT', dial: '+975', format: '## ### ###', flag: '????' },
+  { name: 'Bolivia', code: 'BO', dial: '+591', format: '# ### ####', flag: '????' },
+  { name: 'Bosnia & Herzegovina', code: 'BA', dial: '+387', format: '## ####-###', flag: '????' },
+  { name: 'Botswana', code: 'BW', dial: '+267', format: '## ### ###', flag: '????' },
+  { name: 'Brazil', code: 'BR', dial: '+55', format: '(##) #####-####', flag: '????' },
+  { name: 'Brunei', code: 'BN', dial: '+673', format: '### ####', flag: '????' },
+  { name: 'Bulgaria', code: 'BG', dial: '+359', format: '### ### ###', flag: '????' },
+  { name: 'Burkina Faso', code: 'BF', dial: '+226', format: '## ## ####', flag: '????' },
+  { name: 'Burundi', code: 'BI', dial: '+257', format: '## ## ####', flag: '????' },
+  { name: 'Cambodia', code: 'KH', dial: '+855', format: '## ### ###', flag: '????' },
+  { name: 'Cameroon', code: 'CM', dial: '+237', format: '#### ####', flag: '????' },
+  { name: 'Canada', code: 'CA', dial: '+1', format: '(###) ###-####', flag: '????' },
+  { name: 'Cape Verde', code: 'CV', dial: '+238', format: '### ####', flag: '????' },
+  { name: 'Central African Republic', code: 'CF', dial: '+236', format: '## ## ####', flag: '????' },
+  { name: 'Chad', code: 'TD', dial: '+235', format: '## ## ## ##', flag: '????' },
+  { name: 'Chile', code: 'CL', dial: '+56', format: '# #### ####', flag: '????' },
+  { name: 'China Mainland', code: 'CN', dial: '+86', format: '### #### ####', flag: '????' },
+  { name: 'Colombia', code: 'CO', dial: '+57', format: '### ### ####', flag: '????' },
+  { name: 'Comoros', code: 'KM', dial: '+269', format: '### ####', flag: '????' },
+  { name: 'Congo', code: 'CG', dial: '+242', format: '## ### ####', flag: '????' },
+  { name: 'Costa Rica', code: 'CR', dial: '+506', format: '#### ####', flag: '????' },
+  { name: 'Croatia', code: 'HR', dial: '+385', format: '## ### ####', flag: '????' },
+  { name: 'Cuba', code: 'CU', dial: '+53', format: '# ### ####', flag: '????' },
+  { name: 'Cura?ao', code: 'CW', dial: '+599', format: '### ####', flag: '????' },
+  { name: 'Cyprus', code: 'CY', dial: '+357', format: '## ######', flag: '????' },
+  { name: 'Czech Republic', code: 'CZ', dial: '+420', format: '### ### ###', flag: '????' },
+  { name: 'Denmark', code: 'DK', dial: '+45', format: '## ## ## ##', flag: '????' },
+  { name: 'Djibouti', code: 'DJ', dial: '+253', format: '## ## ## ##', flag: '????' },
+  { name: 'Dominica', code: 'DM', dial: '+1-767', format: '(###) ###-####', flag: '????' },
+  { name: 'Dominican Republic', code: 'DO', dial: '+1-809', format: '(###) ###-####', flag: '????' },
+  { name: 'Ecuador', code: 'EC', dial: '+593', format: '## ### ####', flag: '????' },
+  { name: 'Egypt', code: 'EG', dial: '+20', format: '### ### ####', flag: '????' },
+  { name: 'El Salvador', code: 'SV', dial: '+503', format: '#### ####', flag: '????' },
+  { name: 'Equatorial Guinea', code: 'GQ', dial: '+240', format: '### ### ###', flag: '????' },
+  { name: 'Eritrea', code: 'ER', dial: '+291', format: '# ### ###', flag: '????' },
+  { name: 'Estonia', code: 'EE', dial: '+372', format: '#### ####', flag: '????' },
+  { name: 'Eswatini', code: 'SZ', dial: '+268', format: '## ## ####', flag: '????' },
+  { name: 'Ethiopia', code: 'ET', dial: '+251', format: '## ### ####', flag: '????' },
+  { name: 'Faroe Islands', code: 'FO', dial: '+298', format: '######', flag: '????' },
+  { name: 'Fiji', code: 'FJ', dial: '+679', format: '### ####', flag: '????' },
+  { name: 'Finland', code: 'FI', dial: '+358', format: '## ### ####', flag: '????' },
+  { name: 'France', code: 'FR', dial: '+33', format: '# ## ## ## ##', flag: '????' },
+  { name: 'Gabon', code: 'GA', dial: '+241', format: '## ## ####', flag: '????' },
+  { name: 'Gambia', code: 'GM', dial: '+220', format: '### ####', flag: '????' },
+  { name: 'Georgia', code: 'GE', dial: '+995', format: '### ### ###', flag: '????' },
+  { name: 'Germany', code: 'DE', dial: '+49', format: '#### #######', flag: '????' },
+  { name: 'Ghana', code: 'GH', dial: '+233', format: '### ### ###', flag: '????' },
+  { name: 'Greece', code: 'GR', dial: '+30', format: '### ### ####', flag: '????' },
+  { name: 'Greenland', code: 'GL', dial: '+299', format: '## ## ##', flag: '????' },
+  { name: 'Grenada', code: 'GD', dial: '+1-473', format: '(###) ###-####', flag: '????' },
+  { name: 'Guatemala', code: 'GT', dial: '+502', format: '#### ####', flag: '????' },
+  { name: 'Guinea', code: 'GN', dial: '+224', format: '## ### ###', flag: '????' },
+  { name: 'Guinea-Bissau', code: 'GW', dial: '+245', format: '### ####', flag: '????' },
+  { name: 'Guyana', code: 'GY', dial: '+592', format: '### ####', flag: '????' },
+  { name: 'Haiti', code: 'HT', dial: '+509', format: '## ## ####', flag: '????' },
+  { name: 'Hong Kong', code: 'HK', dial: '+852', format: '#### ####', flag: '????' },
+  { name: 'Honduras', code: 'HN', dial: '+504', format: '####-####', flag: '????' },
+  { name: 'Hungary', code: 'HU', dial: '+36', format: '## ### ####', flag: '????' },
+  { name: 'Iceland', code: 'IS', dial: '+354', format: '### ####', flag: '????' },
+  { name: 'India', code: 'IN', dial: '+91', format: '#####-#####', flag: '????' },
+  { name: 'Indonesia', code: 'ID', dial: '+62', format: '###-###-###', flag: '????' },
+  { name: 'Iran', code: 'IR', dial: '+98', format: '### ### ####', flag: '????' },
+  { name: 'Iraq', code: 'IQ', dial: '+964', format: '### ### ####', flag: '????' },
+  { name: 'Ireland', code: 'IE', dial: '+353', format: '## ### ####', flag: '????' },
+  { name: 'Israel', code: 'IL', dial: '+972', format: '##-###-####', flag: '????' },
+  { name: 'Italy', code: 'IT', dial: '+39', format: '### ### ####', flag: '????' },
+  { name: 'Jamaica', code: 'JM', dial: '+1-876', format: '(###) ###-####', flag: '????' },
+  { name: 'Japan', code: 'JP', dial: '+81', format: '##-####-####', flag: '????' },
+  { name: 'Jordan', code: 'JO', dial: '+962', format: '## #### ####', flag: '????' },
+  { name: 'Kazakhstan', code: 'KZ', dial: '+7', format: '(###) ###-##-##', flag: '????' },
+  { name: 'Kenya', code: 'KE', dial: '+254', format: '### ######', flag: '????' },
+  { name: 'Kiribati', code: 'KI', dial: '+686', format: '## ###', flag: '????' },
+  { name: 'Kosovo', code: 'XK', dial: '+383', format: '## ### ###', flag: '????' },
+  { name: 'Kuwait', code: 'KW', dial: '+965', format: '#### ####', flag: '????' },
+  { name: 'Kyrgyzstan', code: 'KG', dial: '+996', format: '### ######', flag: '????' },
+  { name: 'Laos', code: 'LA', dial: '+856', format: '## ## ### ###', flag: '????' },
+  { name: 'Latvia', code: 'LV', dial: '+371', format: '## ### ###', flag: '????' },
+  { name: 'Lebanon', code: 'LB', dial: '+961', format: '## ### ###', flag: '????' },
+  { name: 'Lesotho', code: 'LS', dial: '+266', format: '# ### ####', flag: '????' },
+  { name: 'Liberia', code: 'LR', dial: '+231', format: '## ### ###', flag: '????' },
+  { name: 'Libya', code: 'LY', dial: '+218', format: '##-#######', flag: '????' },
+  { name: 'Liechtenstein', code: 'LI', dial: '+423', format: '### ####', flag: '????' },
+  { name: 'Lithuania', code: 'LT', dial: '+370', format: '### #####', flag: '????' },
+  { name: 'Luxembourg', code: 'LU', dial: '+352', format: '### ### ###', flag: '????' },
+  { name: 'Macau', code: 'MO', dial: '+853', format: '#### ####', flag: '????' },
+  { name: 'Madagascar', code: 'MG', dial: '+261', format: '## ## #####', flag: '????' },
+  { name: 'Malawi', code: 'MW', dial: '+265', format: '# #### ####', flag: '????' },
+  { name: 'Malaysia', code: 'MY', dial: '+60', format: '##-### ####', flag: '????' },
+  { name: 'Maldives', code: 'MV', dial: '+960', format: '###-####', flag: '????' },
+  { name: 'Mali', code: 'ML', dial: '+223', format: '## ## ####', flag: '????' },
+  { name: 'Malta', code: 'MT', dial: '+356', format: '#### ####', flag: '????' },
+  { name: 'Marshall Islands', code: 'MH', dial: '+692', format: '###-####', flag: '????' },
+  { name: 'Mauritania', code: 'MR', dial: '+222', format: '## ## ####', flag: '????' },
+  { name: 'Mauritius', code: 'MU', dial: '+230', format: '#### ####', flag: '????' },
+  { name: 'Mexico', code: 'MX', dial: '+52', format: '### ### ####', flag: '????' },
+  { name: 'Micronesia', code: 'FM', dial: '+691', format: '###-####', flag: '????' },
+  { name: 'Moldova', code: 'MD', dial: '+373', format: '#### ####', flag: '????' },
+  { name: 'Monaco', code: 'MC', dial: '+377', format: '## ## ## ##', flag: '????' },
+  { name: 'Mongolia', code: 'MN', dial: '+976', format: '## ##-####', flag: '????' },
+  { name: 'Montenegro', code: 'ME', dial: '+382', format: '## ### ###', flag: '????' },
+  { name: 'Montserrat', code: 'MS', dial: '+1-664', format: '(###) ###-####', flag: '????' },
+  { name: 'Morocco', code: 'MA', dial: '+212', format: '##-####-###', flag: '????' },
+  { name: 'Mozambique', code: 'MZ', dial: '+258', format: '## ### ####', flag: '????' },
+  { name: 'Myanmar', code: 'MM', dial: '+95', format: '## ### ###', flag: '????' },
+  { name: 'Namibia', code: 'NA', dial: '+264', format: '## ### ####', flag: '????' },
+  { name: 'Nauru', code: 'NR', dial: '+674', format: '### ####', flag: '????' },
+  { name: 'Nepal', code: 'NP', dial: '+977', format: '##-#######', flag: '????' },
+  { name: 'Netherlands', code: 'NL', dial: '+31', format: '## ########', flag: '????' },
+  { name: 'New Zealand', code: 'NZ', dial: '+64', format: '##-###-####', flag: '????' },
+  { name: 'Nicaragua', code: 'NI', dial: '+505', format: '#### ####', flag: '????' },
+  { name: 'Niger', code: 'NE', dial: '+227', format: '## ## ####', flag: '????' },
+  { name: 'Nigeria', code: 'NG', dial: '+234', format: '### ### ####', flag: '????' },
+  { name: 'North Korea', code: 'KP', dial: '+850', format: '### #### ####', flag: '????' },
+  { name: 'North Macedonia', code: 'MK', dial: '+389', format: '## ### ###', flag: '????' },
+  { name: 'Norway', code: 'NO', dial: '+47', format: '### ## ###', flag: '????' },
+  { name: 'Oman', code: 'OM', dial: '+968', format: '## ### ###', flag: '????' },
+  { name: 'Pakistan', code: 'PK', dial: '+92', format: '####-#######', flag: '????' },
+  { name: 'Palau', code: 'PW', dial: '+680', format: '### ####', flag: '????' },
+  { name: 'Palestine', code: 'PS', dial: '+970', format: '## ### ####', flag: '????' },
+  { name: 'Panama', code: 'PA', dial: '+507', format: '####-####', flag: '????' },
+  { name: 'Papua New Guinea', code: 'PG', dial: '+675', format: '### ####', flag: '????' },
+  { name: 'Paraguay', code: 'PY', dial: '+595', format: '### ######', flag: '????' },
+  { name: 'Peru', code: 'PE', dial: '+51', format: '### ### ###', flag: '????' },
+  { name: 'Philippines', code: 'PH', dial: '+63', format: '### ### ####', flag: '????' },
+  { name: 'Poland', code: 'PL', dial: '+48', format: '### ### ###', flag: '????' },
+  { name: 'Portugal', code: 'PT', dial: '+351', format: '## ### ####', flag: '????' },
+  { name: 'Qatar', code: 'QA', dial: '+974', format: '#### ####', flag: '????' },
+  { name: 'Romania', code: 'RO', dial: '+40', format: '### ### ###', flag: '????' },
+  { name: 'Russia', code: 'RU', dial: '+7', format: '(###) ###-##-##', flag: '????' },
+  { name: 'Rwanda', code: 'RW', dial: '+250', format: '### ### ###', flag: '????' },
+  { name: 'Saint Helena', code: 'SH', dial: '+290', format: '####', flag: '????' },
+  { name: 'Saint Kitts & Nevis', code: 'KN', dial: '+1-869', format: '(###) ###-####', flag: '????' },
+  { name: 'Saint Lucia', code: 'LC', dial: '+1-758', format: '(###) ###-####', flag: '????' },
+  { name: 'Saint Vincent', code: 'VC', dial: '+1-784', format: '(###) ###-####', flag: '????' },
+  { name: 'Samoa', code: 'WS', dial: '+685', format: '## ####', flag: '????' },
+  { name: 'San Marino', code: 'SM', dial: '+378', format: '## ## ## ##', flag: '????' },
+  { name: 'Saudi Arabia', code: 'SA', dial: '+966', format: '## ### ####', flag: '????' },
+  { name: 'Senegal', code: 'SN', dial: '+221', format: '## ### ####', flag: '????' },
+  { name: 'Serbia', code: 'RS', dial: '+381', format: '## ### ####', flag: '????' },
+  { name: 'Seychelles', code: 'SC', dial: '+248', format: '# ### ###', flag: '????' },
+  { name: 'Sierra Leone', code: 'SL', dial: '+232', format: '## ######', flag: '????' },
+  { name: 'Singapore', code: 'SG', dial: '+65', format: '#### ####', flag: '????' },
+  { name: 'Slovakia', code: 'SK', dial: '+421', format: '### ### ###', flag: '????' },
+  { name: 'Slovenia', code: 'SI', dial: '+386', format: '## ### ###', flag: '????' },
+  { name: 'Solomon Islands', code: 'SB', dial: '+677', format: '### ####', flag: '????' },
+  { name: 'Somalia', code: 'SO', dial: '+252', format: '## ### ###', flag: '????' },
+  { name: 'South Africa', code: 'ZA', dial: '+27', format: '## ### ####', flag: '????' },
+  { name: 'South Korea', code: 'KR', dial: '+82', format: '##-####-####', flag: '????' },
+  { name: 'South Sudan', code: 'SS', dial: '+211', format: '## ### ####', flag: '????' },
+  { name: 'Spain', code: 'ES', dial: '+34', format: '### ### ###', flag: '????' },
+  { name: 'Sri Lanka', code: 'LK', dial: '+94', format: '## ### ####', flag: '????' },
+  { name: 'Sudan', code: 'SD', dial: '+249', format: '## ### ####', flag: '????' },
+  { name: 'Suriname', code: 'SR', dial: '+597', format: '###-####', flag: '????' },
+  { name: 'Sweden', code: 'SE', dial: '+46', format: '##-### ## ##', flag: '????' },
+  { name: 'Switzerland', code: 'CH', dial: '+41', format: '## ### ####', flag: '????' },
+  { name: 'Syria', code: 'SY', dial: '+963', format: '## #### ###', flag: '????' },
+  { name: 'Taiwan', code: 'TW', dial: '+886', format: '### ### ###', flag: '????' },
+  { name: 'Tajikistan', code: 'TJ', dial: '+992', format: '## ### ####', flag: '????' },
+  { name: 'Tanzania', code: 'TZ', dial: '+255', format: '## ### ####', flag: '????' },
+  { name: 'Thailand', code: 'TH', dial: '+66', format: '##-###-####', flag: '????' },
+  { name: 'Timor-Leste', code: 'TL', dial: '+670', format: '### ####', flag: '????' },
+  { name: 'Togo', code: 'TG', dial: '+228', format: '## ### ###', flag: '????' },
+  { name: 'Tonga', code: 'TO', dial: '+676', format: '### ####', flag: '????' },
+  { name: 'Trinidad & Tobago', code: 'TT', dial: '+1-868', format: '(###) ###-####', flag: '????' },
+  { name: 'Tunisia', code: 'TN', dial: '+216', format: '## ### ###', flag: '????' },
+  { name: 'Turkey', code: 'TR', dial: '+90', format: '### ### ####', flag: '????' },
+  { name: 'Turkmenistan', code: 'TM', dial: '+993', format: '## ######', flag: '????' },
+  { name: 'Tuvalu', code: 'TV', dial: '+688', format: '## ####', flag: '????' },
+  { name: 'Uganda', code: 'UG', dial: '+256', format: '### ######', flag: '????' },
+  { name: 'Ukraine', code: 'UA', dial: '+380', format: '## ### ####', flag: '????' },
+  { name: 'United Arab Emirates', code: 'AE', dial: '+971', format: '## ### ####', flag: '????' },
+  { name: 'United Kingdom', code: 'GB', dial: '+44', format: '#### ######', flag: '????' },
+  { name: 'United States', code: 'US', dial: '+1', format: '(###) ###-####', flag: '????' },
+  { name: 'Uruguay', code: 'UY', dial: '+598', format: '## ### ###', flag: '????' },
+  { name: 'Uzbekistan', code: 'UZ', dial: '+998', format: '## ### ####', flag: '????' },
+  { name: 'Vanuatu', code: 'VU', dial: '+678', format: '### ####', flag: '????' },
+  { name: 'Vatican City', code: 'VA', dial: '+379', format: '## #### ####', flag: '????' },
+  { name: 'Venezuela', code: 'VE', dial: '+58', format: '###-#######', flag: '????' },
+  { name: 'Vietnam', code: 'VN', dial: '+84', format: '### ### ####', flag: '????' },
+  { name: 'Yemen', code: 'YE', dial: '+967', format: '### ### ###', flag: '????' },
+  { name: 'Zambia', code: 'ZM', dial: '+260', format: '## ### ####', flag: '????' },
+  { name: 'Zimbabwe', code: 'ZW', dial: '+263', format: '## ### ####', flag: '????' },
+];
 const EMPLOYMENT_TYPES = ["Permanent", "Contract", "Freelance", "Internship"];
 const CONTRACT_TYPES = ["Full time", "Part time", "Fixed-term contract", "Others"];
 const WORK_MODES = ["Onsite", "Remote", "Hybrid"];
@@ -425,11 +665,14 @@ function emptyResume() {
     personal_profile: {
       first_name: "",
       last_name: "",
+      professional_headline: "",
       date_of_birth: "",
       phone_country_code: "",
       phone: "",
       email: "",
       location: "",
+      highest_education_level: "",
+      highest_education_year: "",
       website_links: [],
       skill_keywords: [],
       bio: "",
@@ -487,15 +730,21 @@ function normalizeResume(resume) {
           supporting_document_size: "",
         }));
 
+  const inferredHeadline = r.personal_profile?.professional_headline ?? "";
+  const resolvedHeadline = inferredHeadline || getLatestJobTitle(workExperience);
+
   return {
     personal_profile: {
       first_name: r.personal_profile?.first_name ?? "",
       last_name: r.personal_profile?.last_name ?? "",
+      professional_headline: resolvedHeadline,
       date_of_birth: r.personal_profile?.date_of_birth ?? "",
       phone_country_code: r.personal_profile?.phone_country_code ?? "",
       phone: r.personal_profile?.phone ?? "",
       email: r.personal_profile?.email ?? "",
       location: r.personal_profile?.location ?? "",
+      highest_education_level: r.personal_profile?.highest_education_level ?? "",
+      highest_education_year: r.personal_profile?.highest_education_year ?? "",
       website_links: Array.isArray(r.personal_profile?.website_links) ? r.personal_profile.website_links : [],
       skill_keywords: Array.isArray(r.personal_profile?.skill_keywords) ? r.personal_profile.skill_keywords : [],
       bio: r.personal_profile?.bio ?? "",
@@ -574,9 +823,26 @@ function withErrorStyle(base, hasError) {
   return { ...base, borderColor: "crimson", outlineColor: "crimson" };
 }
 
-function validateResume(resume) {
+function validateResume(resume, { birthYearOverride } = {}) {
   if (!resume) return [];
   const errors = [];
+
+  const personal = resume.personal_profile || {};
+  const birthYearValue = birthYearOverride ?? getBirthYearFromDob(personal.date_of_birth);
+  if (isEmpty(personal.first_name)) errors.push("Personal Profile: First Name is required");
+  if (isEmpty(personal.last_name)) errors.push("Personal Profile: Last Name is required");
+  if (isEmpty(personal.professional_headline)) errors.push("Personal Profile: Professional Headline is required");
+  if (isEmpty(birthYearValue)) {
+    errors.push("Personal Profile: Birth Year is required");
+  } else if (!/^\d{4}$/.test(birthYearValue)) {
+    errors.push("Personal Profile: Birth Year must be a 4-digit year");
+  }
+  if (isEmpty(personal.location)) errors.push("Personal Profile: Location is required");
+  if (isEmpty(personal.phone_country_code)) errors.push("Personal Profile: Phone Country Code is required");
+  if (isEmpty(personal.phone)) errors.push("Personal Profile: Phone is required");
+  if (isEmpty(personal.email)) errors.push("Personal Profile: Email is required");
+  if (isEmpty(personal.highest_education_level)) errors.push("Personal Profile: Highest Education Level is required");
+  if (isEmpty(personal.highest_education_year)) errors.push("Personal Profile: Highest Education Year is required");
 
   const workItems = Array.isArray(resume.work_experience) ? resume.work_experience : [];
   workItems.forEach((wk, idx) => {
@@ -647,6 +913,7 @@ export default function ResumeExtractPage() {
 
   // Editable form state
   const [draftResumes, setDraftResumes] = useState([emptyResume()]);
+  const [birthYearOverrides, setBirthYearOverrides] = useState([null]);
   const [selectedResumeIndex, setSelectedResumeIndex] = useState(0);
   const [showValidation, setShowValidation] = useState(false);
 
@@ -676,10 +943,16 @@ export default function ResumeExtractPage() {
     return draftResumes[selectedResumeIndex] || null;
   }, [draftResumes, selectedResumeIndex]);
 
+  const birthYearOverride = birthYearOverrides[selectedResumeIndex] ?? null;
+  const birthYearValue = currentDraftResume
+    ? birthYearOverride ?? getBirthYearFromDob(currentDraftResume.personal_profile?.date_of_birth)
+    : "";
+
   const validationErrors = useMemo(() => {
     if (!currentDraftResume) return [];
-    return validateResume(currentDraftResume);
-  }, [currentDraftResume]);
+    const birthYearOverride = birthYearOverrides[selectedResumeIndex] ?? null;
+    return validateResume(currentDraftResume, { birthYearOverride });
+  }, [currentDraftResume, birthYearOverrides, selectedResumeIndex]);
 
   /**
    * Updates a specific field in the current draft resume.
@@ -703,6 +976,7 @@ export default function ResumeExtractPage() {
     setFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setDraftResumes([emptyResume()]);
+    setBirthYearOverrides([null]);
     setSelectedResumeIndex(0);
     setSelectedHistoryId(null);
     setProvider("openai"); // Reset provider to default
@@ -741,6 +1015,7 @@ export default function ResumeExtractPage() {
     }
 
     setDraftResumes(normalized);
+    setBirthYearOverrides(normalized.map(() => null));
     setSelectedResumeIndex(0);
 
     try {
@@ -858,7 +1133,13 @@ export default function ResumeExtractPage() {
         nextSelectedIndex = prev.length;
         return [...prev.map((r) => cloneDeep(r)), ...normalized];
       });
-      
+
+      if (overwriteOnAnalyze) {
+        setBirthYearOverrides(normalized.map(() => null));
+      } else {
+        setBirthYearOverrides((prev) => [...prev, ...normalized.map(() => null)]);
+      }
+
       setSelectedResumeIndex(nextSelectedIndex);
 
     } catch (err) {
@@ -1047,62 +1328,114 @@ export default function ResumeExtractPage() {
               <h3 style={{ marginTop: 0 }}>Personal Profile</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
-                  <label>First Name</label>
+                  <label>First Name *</label>
                   <input
-                    style={{ width: "100%", padding: 8 }}
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.first_name))}
                     value={currentDraftResume.personal_profile.first_name}
                     onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.first_name = e.target.value; return r; })}
                   />
                 </div>
                 <div>
-                  <label>Last Name</label>
+                  <label>Last Name *</label>
                   <input
-                    style={{ width: "100%", padding: 8 }}
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.last_name))}
                     value={currentDraftResume.personal_profile.last_name}
                     onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.last_name = e.target.value; return r; })}
                   />
                 </div>
                 <div>
-                  <label>Date of Birth</label>
+                  <label>Professional Headline *</label>
                   <input
-                    style={{ width: "100%", padding: 8 }}
-                    value={currentDraftResume.personal_profile.date_of_birth}
-                    onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.date_of_birth = e.target.value; return r; })}
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.professional_headline))}
+                    value={currentDraftResume.personal_profile.professional_headline}
+                    onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.professional_headline = e.target.value; return r; })}
                   />
                 </div>
                 <div>
-                  <label>Location</label>
+                  <label>Birth Year *</label>
                   <input
-                    style={{ width: "100%", padding: 8 }}
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="YYYY"
+                    style={withErrorStyle(
+                      { width: "100%", padding: 8 },
+                      showValidation && (isEmpty(birthYearValue) || !/^\d{4}$/.test(birthYearValue))
+                    )}
+                    value={birthYearValue}
+                    onChange={(e) => {
+                      const nextValue = sanitizeBirthYearInput(e.target.value);
+                      setBirthYearOverrides((prev) => {
+                        const next = [...prev];
+                        next[selectedResumeIndex] = nextValue;
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <label>Location *</label>
+                  <input
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.location))}
                     value={currentDraftResume.personal_profile.location}
                     onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.location = e.target.value; return r; })}
                   />
                 </div>
                 <div>
-                  <label>Country Code</label>
-                  <input
-                    style={{ width: "100%", padding: 8 }}
+                  <label>Country Code *</label>
+                  <select
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.phone_country_code))}
                     value={currentDraftResume.personal_profile.phone_country_code}
                     onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.phone_country_code = e.target.value; return r; })}
-                  />
+                  >
+                    <option value="">Select code</option>
+                    {PHONE_COUNTRIES.map((country) => (
+                      <option key={country.code} value={country.dial}>{country.flag} {country.name} ({country.dial})</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label>Phone</label>
+                  <label>Phone *</label>
                   <input
-                    style={{ width: "100%", padding: 8 }}
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.phone))}
                     value={currentDraftResume.personal_profile.phone}
                     onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.phone = e.target.value; return r; })}
                   />
                 </div>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <label>Email</label>
-                <input
-                  style={{ width: "100%", padding: 8 }}
-                  value={currentDraftResume.personal_profile.email}
-                  onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.email = e.target.value; return r; })}
-                />
+                <div>
+                  <label>Email *</label>
+                  <input
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.email))}
+                    value={currentDraftResume.personal_profile.email}
+                    onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.email = e.target.value; return r; })}
+                  />
+                </div>
+                <div>
+                  <label>Highest Education Level *</label>
+                  <select
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.highest_education_level))}
+                    value={currentDraftResume.personal_profile.highest_education_level}
+                    onChange={(e) => setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.highest_education_level = e.target.value; return r; })}
+                  >
+                    <option value="">Select Level</option>
+                    {EDUCATION_LEVELS.map((level) => (
+                      <option key={level} value={level}>{level}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Highest Education Year *</label>
+                  <input
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="YYYY"
+                    style={withErrorStyle({ width: "100%", padding: 8 }, showValidation && isEmpty(currentDraftResume.personal_profile.highest_education_year))}
+                    value={currentDraftResume.personal_profile.highest_education_year}
+                    onChange={(e) => {
+                      const nextValue = sanitizeBirthYearInput(e.target.value);
+                      setResumeAtIndex(selectedResumeIndex, (r) => { r.personal_profile.highest_education_year = nextValue; return r; });
+                    }}
+                  />
+                </div>
               </div>
 
               <div style={{ marginTop: 12 }}>
