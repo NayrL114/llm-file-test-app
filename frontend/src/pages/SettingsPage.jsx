@@ -1,10 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 
+const RESUME_SCHEMA_KEY = "resumeSchemaCommand";
+const DEFAULT_RESUME_SCHEMA = "resume-extract-v3.json";
+// v0 maps to the legacy extract-v1.json schema file.
+const RESUME_SCHEMA_OPTIONS = [
+  { value: "resume-extract-v3.json", label: "Resume Extract Schema v3" },
+  { value: "resume-extract-v2.json", label: "Resume Extract Schema v2" },
+  { value: "resume-extract-v1.json", label: "Resume Extract Schema v1" },
+  { value: "extract-v1.json", label: "Resume Extract Schema v0" },
+];
+
+function normalizeSchemaCommand(value) {
+  const option = RESUME_SCHEMA_OPTIONS.find((o) => o.value === value);
+  return option ? option.value : DEFAULT_RESUME_SCHEMA;
+}
+
 export default function SettingsPage() {
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || "", []);
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [googleKey, setGoogleKey] = useState("");
+  const [resumeSchema, setResumeSchema] = useState(() =>
+    normalizeSchemaCommand(localStorage.getItem(RESUME_SCHEMA_KEY))
+  );
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("theme");
     return saved === "dark" ? "dark" : "light";
@@ -18,6 +36,13 @@ export default function SettingsPage() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("theme", theme);
   }, [theme]);
+
+  function handleSchemaChange(e) {
+    // Persist the chosen schema for the Resume Extract page.
+    const next = normalizeSchemaCommand(e.target.value);
+    setResumeSchema(next);
+    localStorage.setItem(RESUME_SCHEMA_KEY, next);
+  }
 
   async function handleSave() {
     const openai = openaiKey.trim();
@@ -127,6 +152,35 @@ export default function SettingsPage() {
         {warning && <div style={{ marginTop: 12, color: "var(--warning)" }}>{warning}</div>}
         {error && <div style={{ marginTop: 12, color: "var(--danger)" }}>{error}</div>}
         {status && <div style={{ marginTop: 12, color: "var(--accent)" }}>{status}</div>}
+      </section>
+
+      <section
+        style={{
+          border: "1px solid var(--panel-border)",
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 16,
+          background: "var(--panel-bg)",
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>Resume Extraction</h2>
+        <div style={{ display: "grid", gap: 8, maxWidth: 420 }}>
+          <label>Schema Version</label>
+          <select
+            value={resumeSchema}
+            onChange={handleSchemaChange}
+            style={{ width: "100%", padding: 10 }}
+          >
+            {RESUME_SCHEMA_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Applies to new resume extractions only.
+          </div>
+        </div>
       </section>
 
       <section
