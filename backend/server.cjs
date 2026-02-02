@@ -436,6 +436,9 @@ async function callGPT(prompt, opts = {}) {
  * @returns {Promise<{jsonText: string, parsed: any, responseId?: string}>}
  */
 async function callGPTWithJsonSchema(cmd, contentParts) {
+  // OpenAI strict mode requires additionalProperties: false on all object schemas.
+  const openaiSchema = sanitizeSchemaForOpenAI(cmd.schema);
+
   const response = await client.responses.create({
     model: cmd.model || "gpt-4o-mini",
     instructions: cmd.system || "Return only JSON matching the provided schema.",
@@ -445,7 +448,7 @@ async function callGPTWithJsonSchema(cmd, contentParts) {
         type: "json_schema",
         name: cmd.schema_name || "extraction_result",
         strict: true,
-        schema: cmd.schema,
+        schema: openaiSchema,
       },
     },
   });
@@ -490,6 +493,35 @@ function sanitizeSchemaForGemini(obj) {
       newObj[key] = sanitizeSchemaForGemini(obj[key]);
     }
   }
+  return newObj;
+}
+
+/**
+ * Recursively ensures 'additionalProperties: false' for all object schemas.
+ * OpenAI strict JSON schema rejects objects without this key.
+ *
+ * @param {any} obj The schema object or a part of it.
+ * @returns {any} A deep-cloned schema with additionalProperties enforced.
+ */
+function sanitizeSchemaForOpenAI(obj) {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeSchemaForOpenAI);
+  }
+
+  const newObj = {};
+  for (const key in obj) {
+    newObj[key] = sanitizeSchemaForOpenAI(obj[key]);
+  }
+
+  // If this node describes an object schema, enforce additionalProperties: false.
+  if ((newObj.type === "object" || newObj.properties) && newObj.additionalProperties !== false) {
+    newObj.additionalProperties = false;
+  }
+
   return newObj;
 }
 
