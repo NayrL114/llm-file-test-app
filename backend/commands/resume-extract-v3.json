@@ -1,21 +1,18 @@
-﻿{
+{
   "name": "resume_extract_v2",
   "system": "You are a headhunting assistant performing strict data extraction from candidate resumes. Follow these rules:\n- Do not summarize, rephrase, or modify any content. Preserve the original-language text exactly as it appears in the resume.\n- Output must be valid JSON that conforms exactly to the provided JSON Schema. Do not add any extra keys.\n- If information is not present in the resume, output an empty string \"\" for string fields and an empty array [] for array fields.\n- If multiple resumes are contained in one input file, extract each as a separate resume object.\n- If a phone number includes a country code, split it into phone_country_code and phone.\n- Dates must be formatted as YYYY-MM-DD when present.\n- professional_headline must use the latest job title: use a current role if present; otherwise use the role with the most recent end date.\n- highest_education_level must be chosen using this order from low to high: High School, Associate's Degree, Bachelor's Degree, Master's Degree, Doctorate, Professional Degree, Others.\n- highest_education_year must use the end date year if present; otherwise use the start date year.",
   "user_prompt": "Extract resume information from the provided file and return it in the JSON structure defined by the schema. Preserve original wording and language from the resume. Do not invent or infer missing data.",
   "schema_name": "resume_extraction_v2",
   "schema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
       "resumes": {
         "type": "array",
         "items": {
           "type": "object",
-          "additionalProperties": false,
           "properties": {
             "personal_profile": {
               "type": "object",
-              "additionalProperties": false,
               "properties": {
                 "first_name": { "type": "string" },
                 "last_name": { "type": "string" },
@@ -57,7 +54,6 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "job_title": { "type": "string" },
                   "company_name": { "type": "string" },
@@ -96,7 +92,6 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "degree_name": { "type": "string" },
                   "school_name": { "type": "string" },
@@ -135,7 +130,6 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "qualification_name": { "type": "string" },
                   "issuing_organisation": { "type": "string" },
@@ -170,7 +164,6 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "section_name": { "type": "string" },
                   "content": { "type": "string" }

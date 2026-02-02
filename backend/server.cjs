@@ -763,7 +763,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
 
   let cmd;
   try {
-    const commandFile = req.body?.command || "resume-extract-v2.json";
+    const commandFile = req.body?.command || "resume-extract-v3.json";
     const commandFileSafe = path.basename(commandFile);
     cmd = loadCommand(commandFileSafe);
   } catch (err) {
@@ -853,7 +853,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
       status: "success",
       error: null,
       duration_ms: durationMs,
-      command_name: cmd.name || "resume-extract-v2",
+      command_name: cmd.name || "resume-extract-v3",
       file_name: originalName,
       file_mime: mime,
       file_size: file.size,
@@ -873,7 +873,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "success",
         error: null,
         duration_ms: durationMs,
-        command_name: cmd.name || "resume-extract-v2",
+        command_name: cmd.name || "resume-extract-v3",
         model: provider,
         file_name: originalName,
         file_mime: mime,
@@ -896,7 +896,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
         status: "error",
         error: err?.message || "Analyze failed.",
         duration_ms: durationMs,
-        command_name: cmd?.name || "resume-extract-v2",
+        command_name: cmd?.name || "resume-extract-v3",
         file_name: originalName,
         file_mime: mime,
         file_size: file.size,
@@ -916,7 +916,7 @@ app.post("/api/analyze-file", upload.single("file"), async (req, res) => {
           status: "error",
           error: err?.message || "Analyze failed.",
           duration_ms: durationMs,
-          command_name: cmd?.name || "resume-extract-v2",
+          command_name: cmd?.name || "resume-extract-v3",
           model: provider,
           file_name: originalName,
           file_mime: mime,
