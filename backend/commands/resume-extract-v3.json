@@ -1,0 +1,187 @@
+{
+  "name": "resume_extract_v2",
+  "system": "You are a headhunting assistant performing strict data extraction from candidate resumes. Follow these rules:\n- Do not summarize, rephrase, or modify any content. Preserve the original-language text exactly as it appears in the resume.\n- Output must be valid JSON that conforms exactly to the provided JSON Schema. Do not add any extra keys.\n- If information is not present in the resume, output an empty string \"\" for string fields and an empty array [] for array fields.\n- If multiple resumes are contained in one input file, extract each as a separate resume object.\n- If a phone number includes a country code, split it into phone_country_code and phone.\n- Dates must be formatted as YYYY-MM-DD when present.\n- professional_headline must use the latest job title: use a current role if present; otherwise use the role with the most recent end date.\n- highest_education_level must be chosen using this order from low to high: High School, Associate's Degree, Bachelor's Degree, Master's Degree, Doctorate, Professional Degree, Others.\n- highest_education_year must use the end date year if present; otherwise use the start date year.",
+  "user_prompt": "Extract resume information from the provided file and return it in the JSON structure defined by the schema. Preserve original wording and language from the resume. Do not invent or infer missing data.",
+  "schema_name": "resume_extraction_v2",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "resumes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "personal_profile": {
+              "type": "object",
+              "properties": {
+                "first_name": { "type": "string" },
+                "last_name": { "type": "string" },
+                "professional_headline": { "type": "string" },
+                "date_of_birth": { "type": "string" },
+                "phone_country_code": { "type": "string" },
+                "phone": { "type": "string" },
+                "email": { "type": "string" },
+                "location": { "type": "string" },
+                "highest_education_level": { "type": "string" },
+                "highest_education_year": { "type": "string" },
+                "website_links": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "skill_keywords": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "bio": { "type": "string" }
+              },
+              "required": [
+                "first_name",
+                "last_name",
+                "professional_headline",
+                "date_of_birth",
+                "phone_country_code",
+                "phone",
+                "email",
+                "location",
+                "highest_education_level",
+                "highest_education_year",
+                "website_links",
+                "skill_keywords",
+                "bio"
+              ]
+            },
+            "work_experience": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "job_title": { "type": "string" },
+                  "company_name": { "type": "string" },
+                  "location": { "type": "string" },
+                  "industry": { "type": "string" },
+                  "employment_type": { "type": "string" },
+                  "contract_type": { "type": "string" },
+                  "work_mode": { "type": "string" },
+                  "start_date": { "type": "string" },
+                  "end_date": { "type": "string" },
+                  "is_current": { "type": "string" },
+                  "job_description": { "type": "string" },
+                  "supporting_document_name": { "type": "string" },
+                  "supporting_document_type": { "type": "string" },
+                  "supporting_document_size": { "type": "string" }
+                },
+                "required": [
+                  "job_title",
+                  "company_name",
+                  "location",
+                  "industry",
+                  "employment_type",
+                  "contract_type",
+                  "work_mode",
+                  "start_date",
+                  "end_date",
+                  "is_current",
+                  "job_description",
+                  "supporting_document_name",
+                  "supporting_document_type",
+                  "supporting_document_size"
+                ]
+              }
+            },
+            "education_history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "degree_name": { "type": "string" },
+                  "school_name": { "type": "string" },
+                  "location_country": { "type": "string" },
+                  "location_state": { "type": "string" },
+                  "start_date": { "type": "string" },
+                  "end_date": { "type": "string" },
+                  "is_current": { "type": "string" },
+                  "grade_year": { "type": "string" },
+                  "grade_type": { "type": "string" },
+                  "grade_value": { "type": "string" },
+                  "description": { "type": "string" },
+                  "supporting_document_name": { "type": "string" },
+                  "supporting_document_type": { "type": "string" },
+                  "supporting_document_size": { "type": "string" }
+                },
+                "required": [
+                  "degree_name",
+                  "school_name",
+                  "location_country",
+                  "location_state",
+                  "start_date",
+                  "end_date",
+                  "is_current",
+                  "grade_year",
+                  "grade_type",
+                  "grade_value",
+                  "description",
+                  "supporting_document_name",
+                  "supporting_document_type",
+                  "supporting_document_size"
+                ]
+              }
+            },
+            "licenses_certificates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "qualification_name": { "type": "string" },
+                  "issuing_organisation": { "type": "string" },
+                  "issue_location_country": { "type": "string" },
+                  "issue_location_state": { "type": "string" },
+                  "issue_date": { "type": "string" },
+                  "end_date": { "type": "string" },
+                  "permanent_valid": { "type": "string" },
+                  "last_renewal_date": { "type": "string" },
+                  "industry": { "type": "string" },
+                  "certificate_file_name": { "type": "string" },
+                  "certificate_file_type": { "type": "string" },
+                  "certificate_file_size": { "type": "string" }
+                },
+                "required": [
+                  "qualification_name",
+                  "issuing_organisation",
+                  "issue_location_country",
+                  "issue_location_state",
+                  "issue_date",
+                  "end_date",
+                  "permanent_valid",
+                  "last_renewal_date",
+                  "industry",
+                  "certificate_file_name",
+                  "certificate_file_type",
+                  "certificate_file_size"
+                ]
+              }
+            },
+            "optional_sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "section_name": { "type": "string" },
+                  "content": { "type": "string" }
+                },
+                "required": ["section_name", "content"]
+              }
+            }
+          },
+          "required": [
+            "personal_profile",
+            "work_experience",
+            "education_history",
+            "licenses_certificates",
+            "optional_sections"
+          ]
+        }
+      }
+    },
+    "required": ["resumes"]
+  }
+}
