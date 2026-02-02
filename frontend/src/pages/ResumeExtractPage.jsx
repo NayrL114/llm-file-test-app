@@ -65,32 +65,32 @@ function getLatestJobTitle(workItems) {
   return best;
 }
 
-function getBirthYearFromDob(dateOfBirth) {
-  const match = String(dateOfBirth || "").match(/^(\d{4})/);
-  return match ? match[1] : "";
-}
+// function getBirthYearFromDob(dateOfBirth) {
+//   const match = String(dateOfBirth || "").match(/^(\d{4})/);
+//   return match ? match[1] : "";
+// }
 
-function sanitizeBirthYearInput(value) {
-  return String(value || "").replace(/\D/g, "").slice(0, 4);
-}
+// function sanitizeBirthYearInput(value) {
+//   return String(value || "").replace(/\D/g, "").slice(0, 4);
+// }
 
-function getLatestJobTitle(workItems) {
-  const items = Array.isArray(workItems) ? workItems : [];
-  const currentRole = items.find((wk) => String(wk?.is_current || "").toLowerCase() === "true");
-  if (currentRole?.job_title) return currentRole.job_title;
+// function getLatestJobTitle(workItems) {
+//   const items = Array.isArray(workItems) ? workItems : [];
+//   const currentRole = items.find((wk) => String(wk?.is_current || "").toLowerCase() === "true");
+//   if (currentRole?.job_title) return currentRole.job_title;
 
-  let best = "";
-  let bestDate = "";
-  items.forEach((wk) => {
-    const endDate = String(wk?.end_date || "");
-    if (endDate && endDate > bestDate && wk?.job_title) {
-      bestDate = endDate;
-      best = wk.job_title;
-    }
-  });
+//   let best = "";
+//   let bestDate = "";
+//   items.forEach((wk) => {
+//     const endDate = String(wk?.end_date || "");
+//     if (endDate && endDate > bestDate && wk?.job_title) {
+//       bestDate = endDate;
+//       best = wk.job_title;
+//     }
+//   });
 
-  return best;
-}
+//   return best;
+// }
 
 const RESUME_SCHEMA_KEY = "resumeSchemaCommand";
 const DEFAULT_RESUME_SCHEMA = "resume-extract-v3.json";
